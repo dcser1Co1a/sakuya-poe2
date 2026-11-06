@@ -2,6 +2,8 @@
 
 A desktop helper for **Path of Exile 2** on Windows: a crafting planner, price checks and market lists in one small window that lives in the tray. English and Russian game clients are supported.
 
+**[⬇ Download Sakuya.exe](https://github.com/dcser1Co1a/sakuya-poe2/releases/latest/download/Sakuya.exe)** · free · no login · does not connect to the game · Windows 10 and 11
+
 [По-русски ниже](#по-русски)
 
 ![Sakuya in action: prices, a price check, a crafting plan and hot items](assets/demo.webp)
@@ -57,14 +59,18 @@ New data is checked before it replaces what you have: if a site changes or sends
 
 Some things cannot update by themselves. A new crafting mechanic, or a new omen's effect, has to be taught to the planner in code. The program tells you when a new version is out, but does not replace itself.
 
-## What it does and does not do
+## Is it safe?
 
-- It **does not read the game's memory or files**, and sends nothing to the game beyond one `Ctrl+Alt+C` per key press, the game's own way of copying an item's text.
-- It reads one thing near the game: the build number in Steam's own record of the installed game, to notice patches.
-- Your settings, notes and logs stay on your computer. Nothing about you is sent anywhere.
-- **The program never contacts the trade site.** A search opens in your own browser, and what you do on the site is your own. The program only prepares the link, and it never sends a whisper or anything else to the game for you.
+- **It does not connect to the game.** No game servers, no game memory, no game files, nothing injected into the game and no hooks into its window.
+- **One key press, only when you press its hotkey.** It sends the game `Ctrl+Alt+C`, the game's own way of copying an item's text, the same way Exiled Exchange 2 and Sidekick read items. No macros, no automation, no whispers.
+- **No login.** It never asks for your account, password or POESESSID.
+- **It never contacts the trade site.** A search opens in your own browser, and you search there yourself.
+- **What it downloads:** mods from poe2db, items and art from RePoE, prices from poe.ninja, poe2scout and GGG's public exchange data, the game's build number from SteamCMD, the list of trade stats from GitHub. Near the game it reads one thing: the build number in Steam's record of the installed game, to notice patches.
+- **Nothing about you is sent anywhere.** Settings, notes and history stay in the program's folder.
+- **Open source.** The `Sakuya.exe` on Releases is built from this code by GitHub Actions, and the build log is public.
+- **Why Windows warns.** The file is not signed, as signing costs money, so SmartScreen shows "Windows protected your PC": click **More info**, then **Run anyway**. A few antiviruses mistake unsigned Python programs for threats. You can read the code, or build it yourself as shown below.
 
-Grinding Gear Games' [third-party policy](https://www.pathofexile.com/developer/docs) applies to anything used alongside the game. Read it and decide for yourself.
+Grinding Gear Games does not approve or endorse any third-party tool, so nobody can promise anything in their name. Sakuya is made to keep within their [third-party policy](https://www.pathofexile.com/developer/docs): it plays nothing for you, reads nothing from the game and does not use the trade site. Read the policy and decide for yourself.
 
 ## Building it yourself
 
@@ -113,6 +119,8 @@ This product isn't affiliated with or endorsed by Grinding Gear Games in any way
 
 Помощник для **Path of Exile 2** под Windows: планировщик крафта, проверка цен и списки рынка в одном небольшом окне, которое живёт в трее. Работает с русским и английским клиентом игры.
 
+**[⬇ Скачать Sakuya.exe](https://github.com/dcser1Co1a/sakuya-poe2/releases/latest/download/Sakuya.exe)** · бесплатно · без входа в аккаунт · к игре не подключается · Windows 10 и 11
+
 Короткое видео и снимки экрана — в начале страницы.
 
 **Что умеет**
@@ -133,7 +141,18 @@ This product isn't affiliated with or endorsed by Grinding Gear Games in any way
 
 **Обновления.** Базы, цены, новые лиги и предметы обновляются сами: патч замечается за секунду по записи Steam или за минуту по публичному номеру сборки. Новые данные сначала проверяются, и при сбое остаются старые. Сами не обновляются новые механики крафта: для них нужна новая версия, о выходе которой программа сообщит.
 
-**Важно.** Программа не читает память и файлы игры. Настройки и записи остаются у вас на компьютере. **Программа не обращается к сайту торговли:** поиск открывается в вашем браузере, а всё, что вы делаете на сайте, вы делаете сами. Программа только готовит ссылку и не отправляет за вас шёпоты или что-либо ещё в игру.
+**Это безопасно?**
+
+- **К игре не подключается.** Ни к серверам игры, ни к её памяти, ни к файлам. Ничего не внедряет в игру и не цепляется к её окну.
+- **Одно нажатие, только по вашей клавише.** Программа отправляет игре `Ctrl+Alt+C`, родной способ игры скопировать текст предмета. Так же читают предметы Exiled Exchange 2 и Sidekick. Никаких макросов, автоматизации и шёпотов.
+- **Без входа.** Не просит аккаунт, пароль или POESESSID.
+- **Не обращается к сайту торговли.** Поиск открывается в вашем браузере, ищете там вы сами.
+- **Что скачивает:** моды с poe2db, предметы и картинки с RePoE, цены с poe.ninja, poe2scout и из публичных данных биржи GGG, номер сборки игры со SteamCMD, список модов для поиска с GitHub. Рядом с игрой читает одно: номер сборки в записи Steam об установленной игре, чтобы заметить патч.
+- **О вас ничего никуда не отправляется.** Настройки, заметки и история лежат в папке программы.
+- **Открытый код.** `Sakuya.exe` в Releases собирает из этого кода GitHub Actions, журнал сборки открыт.
+- **Почему ругается Windows.** Файл не подписан: подпись стоит денег. SmartScreen покажет «Windows защитила ваш компьютер»: нажмите **Подробнее**, затем **Выполнить в любом случае**. Некоторые антивирусы по ошибке принимают неподписанные программы на Python за угрозу. Код можно прочитать или собрать программу самому.
+
+Grinding Gear Games не одобряет никакие сторонние программы, поэтому обещать что-то от их имени не может никто. Sakuya сделана так, чтобы оставаться в рамках их [правил для сторонних программ](https://www.pathofexile.com/developer/docs): ничего не делает в игре за вас, ничего не читает из игры и не обращается к сайту торговли.
 
 **Поддержать.** Программа бесплатная и такой останется. Если она сберегла вам сферы и хочется сказать спасибо: USDT только в сети **Tron (TRC20)**, адрес `TVwS7gPpNCBY1PAzAbgciWiJJoYQZDFzz1`. Монеты в других сетях на этот адрес пропадут. Адрес можно скопировать и из меню значка в трее или в разделе «Divine». Ошибки и идеи пишите в [Issues](../../issues).
 
