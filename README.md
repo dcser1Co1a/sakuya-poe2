@@ -4,7 +4,7 @@ A desktop helper for **Path of Exile 2** on Windows: a crafting planner, price c
 
 [По-русски ниже](#по-русски)
 
-![Sakuya in action: prices, a price check, a crafting plan and hot items](assets/demo.gif)
+![Sakuya in action: prices, a price check, a crafting plan and hot items](assets/demo.webp)
 
 | Prices | Price check | Crafting plan | Hot items |
 |---|---|---|---|
