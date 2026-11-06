@@ -1,0 +1,28 @@
+# Built and downloaded by the program itself
+*.exe
+build/
+dist/
+*.spec
+__pycache__/
+.venv/
+
+# What the program keeps next to itself while it runs: downloaded bases and prices
+data.json
+prices.json
+demand.json
+icons.json
+uniques.json
+waystones.json
+trade_stats.json
+updates.json
+patch_watch.json
+market_sections.json
+*.tmp
+*.broken
+
+# The player's own settings, notes and logs: these stay on their computer
+settings.json
+tools.json
+errors.log
+crash.log
+leagues/
