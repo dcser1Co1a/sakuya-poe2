@@ -27,6 +27,8 @@ A desktop helper for **Path of Exile 2** on Windows: a crafting planner, price c
 - **League choice.** Trade, hardcore or Standard, picked at the top of the window. Each league keeps its own prices. Hardcore markets are thin: goods poe.ninja has no price for get an approximate one from GGG's public exchange data for the last hour, a good with no trades at all shows its last price if the program saw one, or says there are none, and plans are built only from what has a price. Uniques in hot items come from poe2scout, which tracks only the current trade leagues, so hardcore and Standard show currency there. SSF has no market, so it has no prices.
 - **Three themes**, all with cherry blossom in them.
 
+> **The crafting planner is in beta.** It works from real weights and current prices, but PoE2 crafting is deep, and the planner does not always find the right craft: it can miss a cheaper path, misread a mechanic or suggest a step that does not work in the game. If a plan looks wrong, please [open an issue](../../issues/new?template=craft_plan.md) with the item text (hover it in game and press `Ctrl+Alt+C`), the mods you wanted and what went wrong. Every report helps fix it for everyone.
+
 ## Install
 
 Download `Sakuya.exe` from [Releases](../../releases) and run it. It needs no installation and keeps its files in the folder it runs from, so give it a folder of its own.
@@ -136,6 +138,8 @@ This product isn't affiliated with or endorsed by Grinding Gear Games in any way
 - **Строка для тайника.** Соберите строку для поиска в игре и вставьте её сами.
 - **Для предметов.** Окно цены показывает следующий тир каждого мода и цену улучшения на тир, а также сравнивает два предмета. Есть калькулятор валюты и заметки.
 - **Выбор лиги.** Торговая, хардкор или Standard, переключается вверху окна. У каждой лиги свои цены. Рынок хардкора маленький: товары без цены на poe.ninja получают примерную цену из публичных данных биржи GGG за прошлый час, у товара совсем без обменов будет показана последняя цена, если программа её видела, или сообщение, что обменов нет, а планы крафта строятся только из того, у чего есть цена. Уники в «Ходовом» берутся с poe2scout, а он считает их только в текущих торговых лигах, поэтому в хардкоре и Standard там будет только валюта. В SSF нет рынка, поэтому нет и цен.
+
+> **Планировщик крафта в бете.** Он считает по настоящим весам и текущим ценам, но крафт в PoE2 глубокий, и правильный путь находится не всегда: программа может пропустить более дешёвый вариант, неверно понять механику или подсказать шаг, который в игре не работает. Если план кажется неправильным, [напишите в Issues](../../issues/new?template=craft_plan.md): текст предмета (наведите на него в игре и нажмите `Ctrl+Alt+C`), какие моды хотели и что пошло не так. Каждое сообщение помогает починить крафт для всех.
 
 **Установка.** Скачайте `Sakuya.exe` из [Releases](../../releases), положите в отдельную папку и запустите. Первый запуск скачивает данные примерно за семь минут в фоне: цены приходят меньше чем за минуту, моды для крафта последними. Окном при этом уже можно пользоваться. Файл не подписан, поэтому SmartScreen или антивирус могут предупредить о нём. Игра должна быть в оконном режиме без рамок.
 
