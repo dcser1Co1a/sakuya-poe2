@@ -113,8 +113,6 @@ Other networks or coins sent to this address are lost. The same address can be c
 
 This product isn't affiliated with or endorsed by Grinding Gear Games in any way. Path of Exile and its art belong to Grinding Gear Games.
 
-*Made with love for Exiles, by Divine.*
-
 ---
 
 ## По-русски
@@ -162,4 +160,8 @@ Grinding Gear Games не одобряет никакие сторонние пр
 
 Лицензия [MIT](LICENSE). Программа никак не связана с Grinding Gear Games и не одобрена ими.
 
-*С любовью к изгнанникам, от Divine.*
+---
+
+<p align="center">🌸<br>
+<i>Made with love for every Exile, from Divine.</i><br>
+<i>С любовью ко всем изгнанникам, от Divine.</i></p>
