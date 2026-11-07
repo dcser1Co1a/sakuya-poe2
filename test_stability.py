@@ -434,7 +434,7 @@ class DatabaseUpdateTests(unittest.TestCase):
 
     def test_a_newer_release_is_noticed(self):
         good = {"tag_name": "v1.2.0", "html_url": "https://x"}
-        self.assertEqual(crafter.read_release(good, "1.1.9"), ("v1.2.0", "https://x"))
+        self.assertEqual(crafter.read_release(good, "1.1.9"), crafter.Release("v1.2.0", "https://x"))
         self.assertIsNone(crafter.read_release(good, "1.2.0"))
         self.assertIsNone(crafter.read_release(good, "1.10.0"))
         self.assertIsNone(crafter.read_release({**good, "prerelease": True}, "1.0.0"))
@@ -570,6 +570,89 @@ class FileShapeTests(unittest.TestCase):
     def test_a_half_written_rush_ends(self):
         import shapes
         self.assertIsNone(shapes.clean_patch_watch({"rush_since": "2026-01-01T00:00:00", "data_then": 5})["rush_since"])
+
+
+class ProgramUpdateTests(unittest.TestCase):
+    NEW = b"MZ" + b"new program" * 1000
+    HOME = f"https://github.com/{crafter.GITHUB_REPOSITORY}/releases/download/v9.0.0/Sakuya.exe"
+
+    def answer(self, **asset):
+        sha = __import__("hashlib").sha256(self.NEW).hexdigest()
+        return {"tag_name": "v9.0.0", "html_url": "https://page", "assets": [{"name": "Sakuya.exe", "browser_download_url": self.HOME, "size": len(self.NEW), "digest": f"sha256:{sha}", **asset}]}
+
+    def release(self, **asset):
+        return crafter.read_release(self.answer(**asset), crafter.VERSION)
+
+    def test_the_file_and_its_checksum_come_with_a_release(self):
+        release = self.release()
+        self.assertEqual((release.tag, release.download, release.size), ("v9.0.0", self.HOME, len(self.NEW)))
+        self.assertEqual(len(release.sha256), 64)
+
+    def test_a_file_from_elsewhere_or_without_a_checksum_is_not_offered(self):
+        for asset in ({"browser_download_url": "https://evil.example/Sakuya.exe"}, {"digest": None}, {"digest": "md5:abc"}, {"name": "notes.txt"}, {"size": 0}):
+            release = self.release(**asset)
+            self.assertEqual((release.tag, release.download), ("v9.0.0", None), asset)
+
+    def test_the_check_hands_the_release_to_the_window(self):
+        told, said = [], []
+        with mock.patch.object(crafter, "fetch", return_value=json.dumps(self.answer())):
+            crafter.update_program({}, said.append, told.append)
+        self.assertEqual([release.tag for release in told], ["v9.0.0"])
+        self.assertIn("v9.0.0", said[0])
+
+    def fetched(self, body):
+        reply = mock.MagicMock()
+        reply.__enter__.return_value.read.side_effect = __import__("io").BytesIO(body).read
+        return mock.patch.object(crafter.urllib.request, "urlopen", return_value=reply)
+
+    def test_a_whole_download_lies_next_to_the_program(self):
+        with tempfile.TemporaryDirectory() as folder:
+            exe = Path(folder) / "Sakuya.exe"
+            steps = []
+            with self.fetched(self.NEW):
+                fresh = crafter.download_update(self.release(), exe, lambda done, total: steps.append(done * 100 // total))
+            self.assertEqual(fresh.read_bytes(), self.NEW)
+            self.assertEqual(steps[-1], 100)
+
+    def test_a_wrong_or_cut_download_is_thrown_away(self):
+        for body in (b"MZ" + b"evil program" * 1000, self.NEW[:500], self.NEW + b"more"):
+            with tempfile.TemporaryDirectory() as folder:
+                exe = Path(folder) / "Sakuya.exe"
+                with self.fetched(body), self.assertRaises(ValueError):
+                    crafter.download_update(self.release(), exe, lambda *_: None)
+                self.assertEqual(list(Path(folder).iterdir()), [])
+
+    def test_the_new_file_takes_the_old_ones_place(self):
+        with tempfile.TemporaryDirectory() as folder:
+            exe, fresh = Path(folder) / "Sakuya.exe", Path(folder) / "Sakuya.update"
+            exe.write_bytes(b"old")
+            fresh.write_bytes(b"new")
+            old = crafter.swap_in_update(exe, fresh)
+            self.assertEqual((exe.read_bytes(), old.read_bytes(), old.name, fresh.exists()), (b"new", b"old", "Sakuya.old.exe", False))
+            self.assertTrue(crafter.remove_update_leftovers(exe))
+            self.assertEqual([path.name for path in Path(folder).iterdir()], ["Sakuya.exe"])
+
+    def test_when_the_new_file_cannot_take_its_place_the_old_one_goes_back(self):
+        with tempfile.TemporaryDirectory() as folder:
+            exe = Path(folder) / "Sakuya.exe"
+            exe.write_bytes(b"old")
+            with self.assertRaises(OSError):
+                crafter.swap_in_update(exe, Path(folder) / "missing.update")
+            self.assertEqual(exe.read_bytes(), b"old")
+
+    def test_the_tray_offers_the_update_and_the_page(self):
+        app = crafter.App.__new__(crafter.App)
+        app.events = __import__("queue").Queue()
+        titles = lambda: [title for title, _ in app._tray_menu()]
+        self.assertNotIn(crafter.t("Обновить до {version}").format(version="v9.0.0"), titles())
+        self.assertIn(crafter.t("Sakuya на GitHub"), titles())
+        dict(app._tray_menu())[crafter.t("Сообщить о проблеме")]()
+        self.assertEqual(app.events.get_nowait(), ("report", None))
+        self.assertTrue(crafter.ISSUES_PAGE.startswith(f"https://github.com/{crafter.GITHUB_REPOSITORY}/issues/"))
+        app.new_release = self.release()
+        self.assertIn(crafter.t("Обновить до {version}").format(version="v9.0.0"), titles())
+        dict(app._tray_menu())[crafter.t("Обновить до {version}").format(version="v9.0.0")]()
+        self.assertEqual(app.events.get_nowait(), ("update", None))
 
 
 class LeagueTests(unittest.TestCase):

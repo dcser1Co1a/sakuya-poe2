@@ -8,6 +8,7 @@ import ctypes
 import ctypes.wintypes
 import faulthandler
 import gc
+import hashlib
 import html
 import http.client
 import io
@@ -585,24 +586,108 @@ def update_scout_currency(stored: dict, on_changed, switches: int | None = None)
     return stored
 
 
-def read_release(answer: dict, current: str) -> tuple[str, str] | None:
+UPDATE_SUFFIX = ".update"  # the new exe while it downloads and is checked, next to the running one
+REPLACED_SUFFIX = ".old"  # the exe that stepped aside for the new one; removed at the next start
+UPDATE_SIZE_LIMIT = 200 * 2 ** 20
+UPDATE_CHUNK = 2 ** 16
+UPDATE_TIMEOUT_SECONDS = 60
+SHA256_DIGEST = re.compile(r"sha256:([0-9a-f]{64})")
+
+
+class Release(NamedTuple):
+    """A newer version. The download, its sha256 and size come from GitHub's own record of the file; without them the player is sent to the page instead."""
+    tag: str
+    link: str
+    download: str | None = None
+    sha256: str | None = None
+    size: int | None = None
+
+
+def read_release(answer: dict, current: str) -> Release | None:
     """A version newer than this one, and where it lies. None for anything else, including what cannot be read."""
     tag = answer.get("tag_name")
     link = answer.get("html_url")
     if not isinstance(tag, str) or not isinstance(link, str) or answer.get("draft") or answer.get("prerelease"):
         return None
     try:
-        return (tag, link) if version_order(tag.removeprefix("v")) > version_order(current) else None
+        if version_order(tag.removeprefix("v")) <= version_order(current):
+            return None
     except (AttributeError, ValueError):
         return None
+    home = f"https://github.com/{GITHUB_REPOSITORY}/releases/download/"
+    for asset in answer.get("assets") or ():
+        if not isinstance(asset, dict):
+            continue
+        url, size, digest = asset.get("browser_download_url"), asset.get("size"), SHA256_DIGEST.fullmatch(str(asset.get("digest") or ""))
+        if (str(asset.get("name", "")).lower().endswith(".exe") and isinstance(url, str) and url.startswith(home) and digest
+                and isinstance(size, int) and 0 < size <= UPDATE_SIZE_LIMIT):
+            return Release(tag, link, url, digest.group(1), size)
+    return Release(tag, link)
 
 
 def update_program(patches: dict, status, on_changed) -> None:
-    """Says when a newer version is out. The file is not replaced by itself: a program swapping its own exe is what antiviruses are there to stop."""
+    """Says when a newer version is out. Nothing is fetched or replaced until the player asks for it."""
     if GITHUB_REPOSITORY:
         release = read_release(json.loads(fetch(f"https://api.github.com/repos/{GITHUB_REPOSITORY}/releases/latest", attempts=1, user_agent=APP_USER_AGENT)), VERSION)
         if release:
-            status(t("Вышла новая версия {version}: {link}").format(version=release[0], link=release[1]))
+            status(t("Вышла новая версия {version}: обновить можно в разделе Divine или в меню значка").format(version=release.tag))
+            if on_changed:
+                on_changed(release)
+
+
+def replaced_path(exe: Path) -> Path:
+    return exe.with_name(f"{exe.stem}{REPLACED_SUFFIX}{exe.suffix}")
+
+
+def download_update(release: Release, exe: Path, progress) -> Path:
+    """Fetches the new exe next to the running one and checks it is whole and is the very file GitHub published. Returns where it lies.
+    progress(done, total) is told as it comes. Anything wrong removes what came and raises."""
+    fresh = exe.with_name(exe.stem + UPDATE_SUFFIX)
+    digest, done = hashlib.sha256(), 0
+    try:
+        request = urllib.request.Request(release.download, headers={"User-Agent": APP_USER_AGENT})
+        with urllib.request.urlopen(request, timeout=UPDATE_TIMEOUT_SECONDS) as answer, open(fresh, "wb") as file:
+            while chunk := answer.read(UPDATE_CHUNK):
+                done += len(chunk)
+                if done > release.size:
+                    raise ValueError("the file is larger than GitHub says")
+                file.write(chunk)
+                digest.update(chunk)
+                progress(done, release.size)
+        if done != release.size or digest.hexdigest() != release.sha256:
+            raise ValueError(t("скачанный файл не совпал с опубликованным"))
+        with open(fresh, "rb") as file:
+            if file.read(2) != b"MZ":
+                raise ValueError(t("скачанный файл не программа"))
+    except BaseException:
+        fresh.unlink(missing_ok=True)
+        raise
+    return fresh
+
+
+def swap_in_update(exe: Path, fresh: Path) -> Path:
+    """A running exe can be moved but not overwritten: it steps aside and the new one takes its name. If that fails, the old one goes back."""
+    old = replaced_path(exe)
+    old.unlink(missing_ok=True)  # left by an earlier update
+    os.replace(exe, old)
+    try:
+        os.replace(fresh, exe)
+    except OSError:
+        os.replace(old, exe)
+        raise
+    return old
+
+
+def remove_update_leftovers(exe: Path) -> bool:
+    """Removes what the last update left: the old exe and a download that never finished. True when nothing is left.
+    The old copy may still be closing, so a False is tried again a little later."""
+    clean = True
+    for path in (replaced_path(exe), exe.with_name(exe.stem + UPDATE_SUFFIX)):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            clean = False
+    return clean
 
 def build_bases(raw_bases: dict, pages: dict[str, dict]) -> dict[str, dict]:
     bases: dict[str, dict] = {}
@@ -1295,10 +1380,10 @@ def check_is_due(state: dict) -> bool:
     return not state.get("next_check") or datetime.fromisoformat(state["next_check"]) <= datetime.now() or not all(path.exists() for path in (DATA_PATH, UNIQUES_PATH, WAYSTONES_PATH))
 
 
-def run_data_updates(status, on_data, on_uniques=lambda: None, on_waystones=lambda: None, watch: PatchWatch | None = None, on_trade_stats=lambda: None) -> None:
+def run_data_updates(status, on_data, on_uniques=lambda: None, on_waystones=lambda: None, watch: PatchWatch | None = None, on_trade_stats=lambda: None, on_release=lambda _: None) -> None:
     """Keeps every base current with nobody's help. The time of the next check lives in a file, so restarts cause no extra requests, and a failure is tried again sooner, then less often.
     A new build of the game wakes this at once."""
-    steps = ((update_mods, on_data), (update_names, on_data), (update_uniques, on_uniques), (update_waystones, on_waystones), (update_trade_stats, on_trade_stats), (update_market_sections, None), (update_program, None))
+    steps = ((update_mods, on_data), (update_names, on_data), (update_uniques, on_uniques), (update_waystones, on_waystones), (update_trade_stats, on_trade_stats), (update_market_sections, None), (update_program, on_release))
     watch = watch or PatchWatch(lambda: None)
     while True:
         state = clean_updates(read_json(UPDATES_PATH) or {})
@@ -1560,7 +1645,20 @@ ENGLISH = {
     "тогда {price}": "then {price}",
     "Очистить": "Clear",
     "нужен поиск": "needs a search",
-    "Вышла новая версия {version}: {link}": "A new version is out, {version}: {link}",
+    "Вышла новая версия {version}: обновить можно в разделе Divine или в меню значка": "A new version is out, {version}: update it on the Divine page or from the tray menu",
+    "Вышла новая версия {version}, у вас {current}": "A new version is out, {version}; you have {current}",
+    "Вышла Sakuya {version}: нажмите, чтобы обновить": "Sakuya {version} is out: click to update",
+    "Вышла новая версия Sakuya {version}": "Sakuya {version} is out",
+    "Обновить можно в разделе Divine или в меню значка в трее": "Update it on the Divine page or from the tray menu",
+    "Обновить до {version}": "Update to {version}", "Что нового": "What's new", "Sakuya на GitHub": "Sakuya on GitHub",
+    "Нашли ошибку или странный план крафта? Напишите, и мы починим": "Found a bug or an odd crafting plan? Tell us and we will fix it",
+    "Сообщить о проблеме": "Report a problem",
+    "Скачиваю новую версию: {percent}%": "Downloading the new version: {percent}%",
+    "Открываю страницу новой версии: скачайте её оттуда": "Opening the new version's page: download it from there",
+    "Не удалось обновить ({reason}). Открываю страницу новой версии, скачайте её вручную": "Could not update ({reason}). Opening the new version's page: download it by hand",
+    "Sakuya обновлена до версии {version}": "Sakuya is updated to version {version}",
+    "скачанный файл не совпал с опубликованным": "the downloaded file does not match the published one",
+    "скачанный файл не программа": "the downloaded file is not a program",
     "Карты": "Maps",
     "Санктум": "Sanctum",
     "Выйти из программы": "Quit the program",
@@ -3257,8 +3355,12 @@ APP_NAME = "Sakuya"
 AUTO_LEAGUE, AUTO_HARDCORE = "auto", "auto_hc"
 MOD_NUMBER = re.compile(r"\((\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)\)|(\d+(?:\.\d+)?)")
 PERMANENT_LEAGUES = frozenset({"Standard", "Hardcore"})
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 GITHUB_REPOSITORY = "dcser1Co1a/sakuya-poe2"  # "owner/name"; empty means the program does not look for new versions
+GITHUB_PAGE = f"https://github.com/{GITHUB_REPOSITORY}"
+ISSUES_PAGE = f"{GITHUB_PAGE}/issues/new/choose"
+LEFTOVER_RETRY_MS, LEFTOVER_TRIES = 5000, 12  # the copy that was replaced may take a moment to close
+UPDATE_TAG_GAP, UPDATE_TAG_PAD_X, UPDATE_TAG_PAD_Y = 6, 18, 7
 FORMER_EXE_NAMES = ("poe2crafter.exe", "sakuraforge.exe")  # a copy still running under an old name holds the same hotkeys
 MAIN_WINDOW_SIZE = (1140, 860)
 MAIN_WINDOW_PLACE = "+40+40"
@@ -3481,6 +3583,9 @@ def send_copy_keys(game_window: int | None, hotkey: dict) -> bool:
 
 class App:
     show_details = False
+    new_release: Release | None = None
+    updating = False
+    update_box = update_tag = update_tag_words = None
     base_icon_label = None
     current_tab = "prices"
     alternatives_box = None
@@ -3557,6 +3662,8 @@ class App:
         self.root.bind("<Map>", lambda event: self._show_petals() if event.widget is self.root else None)
         self.root.bind("<Unmap>", lambda event: self._hide_petals() if event.widget is self.root else None)
         self.reopen = reopen
+        for event in ("<Configure>", "<Map>", "<Unmap>"):  # the update tag follows the window, and hides with it
+            self.root.bind(event, lambda event: self._place_update_tag() if event.widget is self.root else None, add="+")
         learn_market(clean_market_sections(read_json(MARKET_SECTIONS_PATH) or {}))  # before the pages are built, so a kind found earlier has its tab
         if intro:
             self._show_intro()
@@ -3682,7 +3789,9 @@ class App:
         threading.Thread(target=self._saved_trade_stats, args=(language,), daemon=True).start()  # so the first price check does not stall on a large file
         self._price_window()  # built now, hidden, so the first press of the price key opens it without a stall
         watch = PatchWatch(self._on_patch)
-        threading.Thread(target=keep_running, args=(run_data_updates, status, lambda: self.events.put(("reload", None)), lambda: self.events.put(("uniques", None)), lambda: self.events.put(("waystones", None)), watch, lambda: self.events.put(("trade_stats", None))), daemon=True).start()
+        threading.Thread(target=keep_running, args=(run_data_updates, status, lambda: self.events.put(("reload", None)), lambda: self.events.put(("uniques", None)), lambda: self.events.put(("waystones", None)), watch,
+                                                    lambda: self.events.put(("trade_stats", None)), lambda release: self.events.put(("new_version", release))), daemon=True).start()
+        self._remove_update_leftovers()
         threading.Thread(target=keep_running, args=(run_local_build_watch, watch), daemon=True).start()
         threading.Thread(target=keep_running, args=(run_online_build_watch, watch), daemon=True).start()
         self.root.after(POLL_MS, self._poll)
@@ -4137,18 +4246,179 @@ class App:
 
     def _build_about_page(self) -> None:
         page = tk.Frame(self.pages["about"], bg=BG)
-        page.place(relx=0.5, rely=0.42, anchor="center")
+        page.place(relx=0.5, rely=0.5, anchor="center")
         self.about_icon = tk.Label(page, bg=BG)
-        self.about_icon.pack(pady=(0, 14))
-        self._label(page, GREETING, TEXT, 20, True).pack(pady=(0, 16))
+        self.about_icon.pack(pady=(0, 10))
+        self._label(page, GREETING, TEXT, 20, True).pack(pady=(0, 12))
         for line in ABOUT_LINES:
             self._label(page, line.replace("Ctrl+E", hotkey_label(self.hotkeys["copy"])), SOFT, 11).pack(pady=2)
+        self.update_box = tk.Frame(page, bg=BG)  # filled when a newer version is out
+        self.update_box.pack()
+        self._fill_update_box()
         support = tk.Frame(page, bg=BG)
-        support.pack(pady=(20, 0))
+        support.pack(pady=(16, 0))
         self._label(support, t("Поддержать автора: {network}, только эта сеть").format(network=SUPPORT_NETWORK), SOFT, 10).pack()
         self._label(support, SUPPORT_ADDRESS, TEXT, 10, True).pack(pady=(4, 6))
-        self._button(support, t("Скопировать адрес"), self.copy_support_address).pack()
-        self._label(page, ABOUT_CREDITS, MUTED, 9).pack(pady=(22, 0))
+        buttons = tk.Frame(support, bg=BG)
+        buttons.pack()
+        self._button(buttons, t("Скопировать адрес"), self.copy_support_address).pack(side="left", padx=4)
+        self._button(buttons, t("Sakuya на GitHub"), self.open_github).pack(side="left", padx=4)
+        self._label(page, ABOUT_CREDITS, MUTED, 9).pack(pady=(18, 0))
+
+    def _fill_update_box(self, progress: str = "") -> None:
+        """A newer version, with a button that puts it in place, or how far its download has come: on the Divine page and on the tag above the window."""
+        self._show_update_tag(progress)
+        box = self.update_box
+        if not box or not box.winfo_exists():
+            return
+        for child in box.winfo_children():
+            child.destroy()
+        release = self.new_release
+        if not release:  # the same place asks for reports of what went wrong
+            self._label(box, t("Нашли ошибку или странный план крафта? Напишите, и мы починим"), SOFT, 10).pack(pady=(14, 6))
+            self._button(box, t("Сообщить о проблеме"), self.report_problem).pack()
+            return
+        self._label(box, t("Вышла новая версия {version}, у вас {current}").format(version=release.tag, current=VERSION), ACCENT, 11, True).pack(pady=(14, 6))
+        if progress:
+            self._label(box, progress, SOFT, 10).pack()
+            return
+        buttons = tk.Frame(box, bg=BG)
+        buttons.pack()
+        self._button(buttons, t("Обновить до {version}").format(version=release.tag), self.start_update, primary=True).pack(side="left", padx=4)
+        self._button(buttons, t("Что нового"), lambda: webbrowser.open(release.link)).pack(side="left", padx=4)
+
+    def _show_update_tag(self, progress: str = "") -> None:
+        """A small window of its own just above the main one, which goes where it goes: a newer version is out, click to update."""
+        if not self.new_release or self.closing:
+            return self._hide_update_tag()
+        tag = self.update_tag
+        if not tag or not tag.winfo_exists():
+            tag = self.update_tag = tk.Toplevel(self.root, bg=ACCENT)
+            tag.withdraw()
+            tag.overrideredirect(True)
+            words = self.update_tag_words = tk.Label(tag, bg=CHOSEN, fg=ON_CHOSEN, font=(FONT, 10, "bold"), padx=UPDATE_TAG_PAD_X, pady=UPDATE_TAG_PAD_Y, cursor="hand2")
+            words.pack(padx=1, pady=1)  # the tag's own colour shows round it as a thin frame
+            for widget in (tag, words):
+                widget.bind("<Button-1>", lambda _: self.start_update())
+            words.bind("<Enter>", lambda _: words.config(bg=CHOSEN_LIGHT))
+            words.bind("<Leave>", lambda _: words.config(bg=CHOSEN))
+        tag.attributes("-topmost", bool(self.root.attributes("-topmost")))
+        self.update_tag_words.config(text=progress or t("Вышла Sakuya {version}: нажмите, чтобы обновить").format(version=self.new_release.tag),
+                                     cursor="watch" if progress else "hand2")
+        self._place_update_tag()
+
+    def _place_update_tag(self) -> None:
+        tag = self.update_tag
+        if not tag or not tag.winfo_exists():
+            return
+        try:
+            if self.closing or not self.root.winfo_viewable():
+                return tag.withdraw()
+            tag.update_idletasks()
+            width, height = tag.winfo_reqwidth(), tag.winfo_reqheight()
+            x = self.root.winfo_rootx() + (self.root.winfo_width() - width) // 2
+            y = self.root.winfo_rooty() - height - UPDATE_TAG_GAP
+            if y < all_monitors()[1]:  # the window is at the top of the screen: the tag lies over its banner instead
+                y = self.root.winfo_rooty() + UPDATE_TAG_GAP
+            tag.geometry(f"+{x}+{y}")
+            if tag.state() != "normal":
+                tag.deiconify()
+            tag.lift()
+        except tk.TclError:  # the window is being rebuilt or closed
+            pass
+
+    def _hide_update_tag(self) -> None:
+        tag = self.update_tag
+        if tag and tag.winfo_exists():
+            tag.withdraw()
+
+    def open_github(self) -> None:
+        webbrowser.open(GITHUB_PAGE)
+
+    def report_problem(self) -> None:
+        """GitHub's page for a new issue, where the form for a wrong crafting plan waits. Nothing is sent from here."""
+        webbrowser.open(ISSUES_PAGE)
+
+    def offer_update(self, release: Release) -> None:
+        """Said once per version: the check comes back every few hours."""
+        known = self.new_release
+        self.new_release = release
+        if self.updating:
+            return
+        self._fill_update_box()
+        if self.tray and (not known or known.tag != release.tag):
+            self.tray.notify(t("Вышла новая версия Sakuya {version}").format(version=release.tag), t("Обновить можно в разделе Divine или в меню значка в трее"))
+
+    def start_update(self) -> None:
+        """Only on the player's word. A copy run from the source, or a release without a checked file, sends the player to the page instead."""
+        release = self.new_release
+        if not release or self.updating:
+            return
+        if not getattr(sys, "frozen", False) or not release.download:
+            webbrowser.open(release.link)
+            return self.set_status(t("Открываю страницу новой версии: скачайте её оттуда"))
+        self.updating = True
+        exe = Path(sys.executable)
+        shown = [-1]
+
+        def progress(done: int, total: int) -> None:
+            percent = done * 100 // max(total, 1)
+            if percent != shown[0]:
+                shown[0] = percent
+                self.events.put(("update_progress", percent))
+
+        def fetch_it() -> None:
+            try:
+                self.events.put(("update_ready", download_update(release, exe, progress)))
+            except Exception as error:
+                log_error("downloading an update")
+                self.events.put(("update_failed", str(error)))
+        self._fill_update_box(t("Скачиваю новую версию: {percent}%").format(percent=0))
+        threading.Thread(target=fetch_it, daemon=True).start()
+
+    def finish_update(self, fresh: Path) -> None:
+        """The checked file takes the running one's place, and the new version starts. It closes this copy itself, as any new start does."""
+        exe = Path(sys.executable)
+        try:
+            old = swap_in_update(exe, fresh)
+        except OSError as error:
+            log_error("putting an update in place")
+            fresh.unlink(missing_ok=True)
+            return self.update_failed(str(error))
+        try:
+            subprocess.Popen([str(exe)], cwd=str(exe.parent), env={**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"})
+        except OSError as error:
+            log_error("starting the update")
+            os.replace(exe, fresh)
+            os.replace(old, exe)
+            fresh.unlink(missing_ok=True)
+            return self.update_failed(str(error))
+        self._save_tools()
+        self.closing = True  # no more hotkeys or events here: they belong to the new copy now
+        if self.tray:
+            self.tray.remove()
+            self.tray = None
+        if self.price_window and self.price_window.exists():
+            self.price_window.window.withdraw()
+        self.root.withdraw()
+        self.root.after(RESTART_WAIT_MS, self.quit)  # whatever happened to the new copy, this one must not stay behind
+
+    def update_failed(self, reason: str) -> None:
+        self.updating = False
+        self._fill_update_box()
+        self.set_status(t("Не удалось обновить ({reason}). Открываю страницу новой версии, скачайте её вручную").format(reason=reason))
+        if self.new_release:
+            webbrowser.open(self.new_release.link)
+
+    def _remove_update_leftovers(self, tries: int = LEFTOVER_TRIES) -> None:
+        """After an update the old exe is still next to the new one, and its copy may be closing for a moment."""
+        exe = Path(sys.executable)
+        if not getattr(sys, "frozen", False):
+            return
+        if tries == LEFTOVER_TRIES and replaced_path(exe).exists():
+            self.set_status(t("Sakuya обновлена до версии {version}").format(version=VERSION))
+        if not remove_update_leftovers(exe) and tries > 1:
+            self.root.after(LEFTOVER_RETRY_MS, self._remove_update_leftovers, tries - 1)
 
     def copy_support_address(self) -> None:
         """Puts the wallet address on the clipboard for the player to paste into their own wallet."""
@@ -4742,11 +5012,18 @@ class App:
         self.root.destroy()
 
     def _start_tray(self) -> None:
-        self.tray = TrayIcon(APP_NAME, lambda: self.events.put(("toggle", None)),
-                             lambda: ((t("Показать или скрыть главное окно"), lambda: self.events.put(("toggle", None))),
-                                      (t("Поддержать автора (скопировать адрес USDT TRC20)"), lambda: self.events.put(("support", None))),
-                                      (t("Выход"), lambda: self.events.put(("quit", None)))))
+        self.tray = TrayIcon(APP_NAME, lambda: self.events.put(("toggle", None)), self._tray_menu)
         self.tray.start()
+
+    def _tray_menu(self) -> tuple:
+        """Asked anew at every right click, on the tray's own thread: it only reads, and everything it does goes through the events."""
+        release = self.new_release
+        return ((t("Показать или скрыть главное окно"), lambda: self.events.put(("toggle", None))),
+                *(((t("Обновить до {version}").format(version=release.tag), lambda: self.events.put(("update", None))),) if release else ()),
+                (t("Sakuya на GitHub"), lambda: self.events.put(("github", None))),
+                (t("Сообщить о проблеме"), lambda: self.events.put(("report", None))),
+                (t("Поддержать автора (скопировать адрес USDT TRC20)"), lambda: self.events.put(("support", None))),
+                (t("Выход"), lambda: self.events.put(("quit", None))))
 
     def _handle_events(self) -> None:
         while not self.events.empty():
@@ -4791,6 +5068,20 @@ class App:
                 self.hide_or_show()
             elif kind == "support":
                 self.copy_support_address()
+            elif kind == "github":
+                self.open_github()
+            elif kind == "report":
+                self.report_problem()
+            elif kind == "new_version":
+                self.offer_update(payload)
+            elif kind == "update":
+                self.start_update()
+            elif kind == "update_progress":
+                self._fill_update_box(t("Скачиваю новую версию: {percent}%").format(percent=payload))
+            elif kind == "update_ready":
+                self.finish_update(payload)
+            elif kind == "update_failed":
+                self.update_failed(payload)
             elif kind == "copied" and payload == "price":
                 self.root.withdraw()  # a price check only needs its own window; the toggle key brings this one back
                 self.check_price()
