@@ -5094,13 +5094,19 @@ class App:
         elif key == "demand":
             self.demand_page.render()
         elif key == "build":
-            self.build_page.render()
+            if self.build_stale:  # its own clicks redraw it; only data that came while it was away does
+                self.build_stale = False
+                self.build_page.render()
         elif key == "drops":
             self.drop_page.render()
         elif key == "filter":
-            self.filter_page.render()
+            self.filter_page.show()
         elif key == "tools":
             self.tools_page.render()
+
+    def _build_page_data_changed(self) -> None:
+        """Names, prices, art or drop sources came: the build page shows them the next time it is opened. An open page is not redrawn under the player, as before."""
+        self.build_stale = True
 
     def _take_away_other_pages(self) -> None:
         for key, page in self.pages.items():
@@ -5117,6 +5123,7 @@ class App:
 
     def _build_build_page(self) -> None:
         """The build page: a pasted Path of Building code, its items where the game shows them. A language change keeps what is open."""
+        self.build_stale = True  # drawn on the first visit, then again only when data came meanwhile (see show_tab)
         colors = {"background": BG, "panel": PANEL, "border": BORDER, "text": TEXT, "soft": SOFT, "muted": MUTED, "raised": RAISED, "selected": CHOSEN, "accent": ACCENT, "down": DOWN_COLOR}
         helpers = {"make_entry": self._entry, "button": self._button, "clipboard": self._clipboard_text, "find_base": self._base_in_line, "language": lambda: language, "enable_scrolling": self._enable_scrolling,
                    "base_info": lambda base: self.db.bases.get(base) if self.db else None, "page_of": self._page_of_base, "limits": affix_limits,
@@ -6413,6 +6420,7 @@ class App:
                 self.set_status(payload)
             elif kind == "reload":
                 self.load_data()
+                self._build_page_data_changed()
                 # The data brings the Russian names of currency: on a first start the cards were drawn before it came, with the English ones.
                 self.price_drawn_key = None
                 if self.current_tab == "prices" and self.prices:
@@ -6421,6 +6429,7 @@ class App:
                     self.demand_page.render(force=True)
             elif kind == "prices":
                 self.load_prices()
+                self._build_page_data_changed()
                 self.filter_page.prices_changed()  # the filter follows new prices when asked to
             elif kind == "icons":
                 self.on_icons_ready()
@@ -6429,11 +6438,14 @@ class App:
                     self.demand_page.render(force=True)
                 elif self.current_tab == "build":
                     self.build_page.render(details=False)
+                else:
+                    self.build_stale = True
             elif kind == "uniques":
                 uniques = clean_uniques(read_json(UNIQUES_PATH) or {})
                 self.unique_art, self.unique_russian, self.item_art = uniques.get("art", {}), uniques.get("russian", {}), uniques.get("items", {})
                 self.exchange_names = uniques.get("exchange", {})
                 self.drops = clean_drops(read_json(DROPS_PATH) or {})
+                self._build_page_data_changed()
                 if self.current_tab == "drops":
                     self.drop_page.render()
             elif kind == "waystones":

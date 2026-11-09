@@ -403,6 +403,8 @@ class FilterPage:
         self.colors, self.t, self.helpers = colors, translate, helpers
         self.settings = clean_settings(helpers["load"]())
         self.open_details: set[int] = set()
+        self.drawn_from = None  # see show()
+        self.preview_stale = False
         self.open_help: set[int] = set()  # steps whose «?» is open; they stay open while the page is rebuilt
         page = tk.Frame(parent, bg=colors["background"], padx=10)
         page.pack(fill="both", expand=True)
@@ -425,9 +427,14 @@ class FilterPage:
         holder.rowconfigure(0, weight=1)
         self.steps_canvas = tk.Canvas(holder, bg=colors["background"], highlightthickness=0, bd=0)
         self.steps_canvas.grid(row=0, column=0, sticky="nsew")
-        self.steps = self._new_steps()
-        self.steps_window = self.steps_canvas.create_window(0, 0, window=self.steps, anchor="nw")
-        self.steps_canvas.bind("<Configure>", lambda event: self.steps_canvas.itemconfigure(self.steps_window, width=event.width))
+        # Each step is its own window on the canvas, not all of them in one frame: the canvas leaves a step scrolled out of sight unshown,
+        # and showing the page costs only what is in view (one frame holding all steps cost every widget each time the tab was opened).
+        self.cards: list[tk.Frame] = []
+        self.card_items: list[int] = []
+        self.new_cards: list[tk.Frame] = []
+        self.steps_height = 1
+        self.layout_job = None
+        self.steps_canvas.bind("<Configure>", lambda _: self._lay_out_cards())
         helpers["enable_scrolling"](holder, self.steps_canvas)
         side = tk.Frame(body, bg=colors["panel"], padx=12, pady=10)
         side.grid(row=0, column=1, sticky="nsew")
@@ -495,23 +502,51 @@ class FilterPage:
             self.write_now(quiet=True)
         if self.page.winfo_exists() and self.page.winfo_ismapped():
             self._draw_preview()
+        else:
+            self.preview_stale = True
+
+    def _kinds_present(self) -> list[str]:
+        return sorted({kind for kind in (self.helpers["prices"]() or {}).get("kinds", {}).values() if kind in KIND_TITLES}, key=lambda kind: list(KIND_TITLES).index(kind))
+
+    def _drawn_from(self) -> tuple:
+        """What the steps are drawn from beyond the page's own choices: the filters in the game's folder and the kinds of goods with prices."""
+        folder = filter_folder()
+        return folder, tuple(usual_filters(folder)), tuple(self._kinds_present())
+
+    def show(self) -> None:
+        """The page is opened: the steps change only by their own controls, so they are built again only when the folder or the kinds changed,
+        and the preview only when prices came while the page was away. Building the whole page took most of a second on each visit."""
+        if self.drawn_from != self._drawn_from():
+            self.render(keep_place=self.drawn_from is not None)
+        elif self.preview_stale:
+            self._draw_preview()
 
     # ---- drawing
     def _step(self, number: int, title: str, hint: str = "") -> tk.Frame:
         """One numbered step: a card with its number, title, a line of help, and a «?» that opens the step's guide in plain words."""
         colors = self.colors
-        card = tk.Frame(self.steps, bg=colors["panel"], padx=12, pady=8)
-        card.pack(fill="x", pady=(0, 6))
+        card = tk.Frame(self.steps_canvas, bg=colors["panel"], padx=12, pady=8)
+        texts = []
+
+        def resized(event) -> None:
+            for label in texts:  # the help wraps at the step's width, so a narrow window does not cut it
+                label.configure(wraplength=max(event.width - 40, 200))
+            self._lay_out_soon()  # a step grew or shrank: the ones below move
+
+        card.bind("<Configure>", resized)
+        self.new_cards.append(card)
         head = tk.Frame(card, bg=colors["panel"])
         head.pack(fill="x")
         tk.Label(head, text=str(number), bg=colors["selected"], fg=colors.get("on_selected", colors["text"]), font=(BODY, 10, "bold"), width=2).pack(side="left")
         tk.Label(head, text=title, bg=colors["panel"], fg=colors["text"], font=(BODY, 11, "bold")).pack(side="left", padx=(8, 0))
         if hint:
-            tk.Label(card, text=hint, bg=colors["panel"], fg=colors["muted"], font=(BODY, 9), anchor="w", justify="left", wraplength=500).pack(fill="x", pady=(4, 0))
+            texts.append(tk.Label(card, text=hint, bg=colors["panel"], fg=colors["muted"], font=(BODY, 9), anchor="w", justify="left", wraplength=500))
+            texts[-1].pack(fill="x", pady=(4, 0))
         inner = tk.Frame(card, bg=colors["panel"])
         inner.pack(fill="x", pady=(6, 0))
         if number in GUIDES:
             guide = tk.Label(card, text=self.t(GUIDES[number]), bg=colors["raised"], fg=colors["text"], font=(BODY, 9), anchor="w", justify="left", wraplength=500, padx=10, pady=8)
+            texts.append(guide)
             mark = tk.Label(head, text=" ? ", bg=colors["raised"], fg=colors["accent"], font=(BODY, 10, "bold"), cursor="hand2")
             mark.pack(side="right")
 
@@ -532,6 +567,25 @@ class FilterPage:
             show(number in self.open_help)
         return inner
 
+    def _radios(self, parent, choices: list[tuple], current, chose, font) -> None:
+        """A choice of one, drawn as labels with a dot: Tk's own radio buttons cost about 50 ms each every time the page is shown."""
+        colors, labels = self.colors, []
+
+        def paint(chosen) -> None:
+            for label, value, text in labels:
+                label.config(text=("● " if value == chosen else "○ ") + text, fg=colors["text"] if value == chosen else colors["soft"])
+
+        def pick(value) -> None:
+            paint(value)
+            chose(value)
+
+        for value, text in choices:
+            label = tk.Label(parent, bg=colors["panel"], font=font, cursor="hand2")
+            label.pack(side="left", padx=(0, 12))
+            label.bind("<Button-1>", lambda _, value=value: pick(value))
+            labels.append((label, value, text))
+        paint(current)
+
     def _combo(self, parent, values: list[str], current: str, width: int, chose) -> ttk.Combobox:
         box = ttk.Combobox(parent, state="readonly", width=width, values=values)
         box.set(current)
@@ -539,18 +593,30 @@ class FilterPage:
         box.bind("<MouseWheel>", lambda _: "break")  # scrolling the page must not turn a choice over
         return box
 
-    def _new_steps(self) -> tk.Frame:
-        frame = tk.Frame(self.steps_canvas, bg=self.colors["background"])
-        frame.bind("<Configure>", lambda _: self.steps_canvas.configure(scrollregion=self.steps_canvas.bbox("all")))
-        return frame
+    def _lay_out_soon(self) -> None:
+        if self.layout_job is None:
+            self.layout_job = self.steps_canvas.after_idle(self._lay_out_cards)
+
+    def _lay_out_cards(self) -> None:
+        """The steps one under another at the canvas's width, and the scrolling as tall as they are."""
+        if self.layout_job is not None:
+            self.steps_canvas.after_cancel(self.layout_job)
+            self.layout_job = None
+        width, y = max(self.steps_canvas.winfo_width(), 1), 0
+        for item, card in zip(self.card_items, self.cards):
+            self.steps_canvas.coords(item, 0, y)
+            self.steps_canvas.itemconfigure(item, width=width)
+            y += card.winfo_reqheight() + 6
+        self.steps_height = max(y, 1)
+        self.steps_canvas.configure(scrollregion=(0, 0, width, self.steps_height))
 
     def render(self, keep_place: bool = False) -> None:
         """The steps are built anew out of sight and take the old ones' place in one stroke, at the same scroll: removing a line or opening its settings does not make the page jump."""
         colors, t, helpers = self.colors, self.t, self.helpers
-        old = self.steps
-        place = self.steps_canvas.yview()[0] * max(old.winfo_height(), 1) if keep_place else 0  # in pixels: the page above the change stays put
-        self.steps = self._new_steps()
-        folder = filter_folder()
+        place = self.steps_canvas.yview()[0] * self.steps_height if keep_place else 0  # in pixels: the page above the change stays put
+        self.new_cards = []
+        self.drawn_from = self._drawn_from()
+        folder = self.drawn_from[0]
 
         step = self._step(1, t("Ваш обычный фильтр"), t("Им показывается всё, что Sakuya не подсвечивает. Выберите тот, которым играете."))
         choices = [t("Без обычного фильтра"), *usual_filters(folder)]
@@ -565,15 +631,12 @@ class FilterPage:
         link_row = tk.Frame(step.master, bg=colors["panel"])
         link_row.pack(fill="x", pady=(6, 0))
         tk.Label(link_row, text=t("Подключать:"), bg=colors["panel"], fg=colors["muted"], font=(BODY, 9)).pack(side="left", padx=(0, 6))
-        link = tk.StringVar(value=self.settings["link"])
 
-        def chose_link():
-            self.settings["link"] = link.get()
+        def chose_link(key):
+            self.settings["link"] = key
             self._changed(redraw_steps=False)
 
-        for key, title in LINKS.items():
-            tk.Radiobutton(link_row, text=t(title), variable=link, value=key, command=chose_link, bg=colors["panel"], fg=colors["text"], selectcolor=colors["raised"],
-                           activebackground=colors["panel"], activeforeground=colors["text"], font=(BODY, 9), cursor="hand2").pack(side="left", padx=(0, 8))
+        self._radios(link_row, [(key, t(title)) for key, title in LINKS.items()], self.settings["link"], chose_link, (BODY, 9))
 
         step = self._step(2, t("Что подсвечивать"), t("Каждая вещь попадает в самую дорогую строку, до которой дотягивает её цена. «Громко» — луч, звук и значок на карте, «Значок» — только значок, «Только цвет» — без них. «⚙» — свой звук, шрифт, луч и значок."))
         quick = tk.Frame(step.master, bg=colors["panel"])
@@ -592,7 +655,7 @@ class FilterPage:
         self._fill_lines(self.lines_box)
 
         step = self._step(3, t("Виды предметов"), t("Пороги по видам, как смешанная строгость: «Мягче» — вещи этого вида подсвечиваются при вдвое меньшей цене, «Строже» — при вдвое большей, «Не трогать» — их решает обычный фильтр."))
-        kinds_present = sorted({kind for kind in (self.helpers["prices"]() or {}).get("kinds", {}).values() if kind in KIND_TITLES}, key=lambda kind: list(KIND_TITLES).index(kind))
+        kinds_present = self._kinds_present()
         grid = tk.Frame(step, bg=colors["panel"])
         grid.pack(fill="x")
         rule_keys = list(KIND_RULES)
@@ -627,9 +690,8 @@ class FilterPage:
                 self.settings["hide_below"] = value if hide_on.get() else None
                 self._changed(redraw_steps=False, typing=True)
 
-        for on, title in ((False, t("Показывать как в обычном фильтре")), (True, t("Прятать то, что дешевле"))):
-            tk.Radiobutton(step, text=title, variable=hide_on, value=on, command=set_hide, bg=colors["panel"], fg=colors["text"], selectcolor=colors["raised"],
-                           activebackground=colors["panel"], activeforeground=colors["text"], font=(BODY, 10), cursor="hand2").pack(side="left", padx=(0, 6))
+        self._radios(step, [(False, t("Показывать как в обычном фильтре")), (True, t("Прятать то, что дешевле"))], hide_on.get(),
+                     lambda on: (hide_on.set(on), set_hide()), (BODY, 10))
         entry = helpers["entry"](step, amount, 5)
         entry.pack(side="left", ipady=2)
         entry.bind("<KeyRelease>", set_hide)
@@ -651,11 +713,15 @@ class FilterPage:
 
         helpers["switch"](second, t("Обновлять самому, когда меняются цены"), auto, set_auto, size=9).pack(side="left")
         self._draw_preview()
-        self.steps.update_idletasks()  # the new steps have their size before they are shown
-        self.steps_canvas.itemconfigure(self.steps_window, window=self.steps)
-        self.steps_canvas.configure(scrollregion=(0, 0, self.steps_canvas.winfo_width(), self.steps.winfo_reqheight()))
-        self.steps_canvas.yview_moveto(place / max(self.steps.winfo_reqheight(), 1))
-        old.destroy()
+        self.steps_canvas.update_idletasks()  # the new steps have their size before they are shown
+        old_cards, old_items = self.cards, self.card_items
+        self.cards, self.card_items = self.new_cards, [self.steps_canvas.create_window(0, 0, window=card, anchor="nw") for card in self.new_cards]
+        self._lay_out_cards()
+        self.steps_canvas.yview_moveto(place / self.steps_height)
+        for item in old_items:
+            self.steps_canvas.delete(item)
+        for card in old_cards:
+            card.destroy()
 
     def _use_preset(self, key: str) -> None:
         apply_preset(self.settings, key, (self.helpers["prices"]() or {}).get("exalted_per_divine"))
@@ -760,7 +826,7 @@ class FilterPage:
         old = getattr(self, "lines_box", None)
         if old is None or not old.winfo_exists():
             return self.render(keep_place=True)
-        place = self.steps_canvas.yview()[0] * max(self.steps.winfo_height(), 1)
+        place = self.steps_canvas.yview()[0] * self.steps_height
         fresh = tk.Frame(old.master, bg=self.colors["panel"])
         self._fill_lines(fresh)
         old.pack_forget()
@@ -768,9 +834,9 @@ class FilterPage:
         old.destroy()
         self.lines_box = fresh
         self._draw_preview()
-        self.steps.update_idletasks()
-        self.steps_canvas.configure(scrollregion=(0, 0, self.steps_canvas.winfo_width(), self.steps.winfo_reqheight()))
-        self.steps_canvas.yview_moveto(place / max(self.steps.winfo_reqheight(), 1))
+        self.steps_canvas.update_idletasks()
+        self._lay_out_cards()
+        self.steps_canvas.yview_moveto(place / self.steps_height)
 
     def _add_tier(self) -> None:
         last = self.settings["tiers"][-1]
@@ -821,19 +887,21 @@ class FilterPage:
             self._changed(redraw_steps=False)
 
         self._combo(row, list(UNITS), tier["unit"], 4, chose_unit).pack(side="left", padx=(0, 6))
-        swatches = tk.Frame(row, bg=colors["panel"])
+        step_width = 18  # one canvas for the colours, not a widget each: every widget costs time each time the page is shown
+        swatches = tk.Canvas(row, bg=colors["panel"], width=step_width * len(SHOWN_COLORS), height=22, highlightthickness=0, bd=0, cursor="hand2")
         swatches.pack(side="left", padx=(0, 6))
+        swatches.bind("<Button-1>", lambda event: chose_color(SHOWN_COLORS[min(max(event.x // step_width, 0), len(SHOWN_COLORS) - 1)]))
 
         def paint_swatches():
-            for child in swatches.winfo_children():
-                child.destroy()
-            for color in SHOWN_COLORS:
+            swatches.delete("all")
+            for number, color in enumerate(SHOWN_COLORS):
                 back, text_rgb, border, _ = COLORS[color]
-                chosen = color == tier["color"]
-                swatch = tk.Label(swatches, bg=_hex(back), width=1, text="✓" if chosen else " ", fg=_hex(text_rgb), font=(BODY, 8, "bold"), cursor="hand2",
-                                  highlightthickness=2, highlightbackground=_hex(border) if chosen else colors["panel"])
-                swatch.pack(side="left", padx=1)
-                swatch.bind("<Button-1>", lambda _, c=color: chose_color(c))
+                left = number * step_width + 1
+                if color == tier["color"]:
+                    swatches.create_rectangle(left, 1, left + step_width - 3, 21, fill=_hex(back), outline=_hex(border), width=2)
+                    swatches.create_text(left + (step_width - 2) / 2, 11, text="✓", fill=_hex(text_rgb), font=(BODY, 8, "bold"))
+                else:
+                    swatches.create_rectangle(left + 2, 3, left + step_width - 5, 19, fill=_hex(back), outline="")
 
         def chose_color(color):
             loud = loudness_of(tier)
@@ -972,6 +1040,7 @@ class FilterPage:
                 pass
 
     def _draw_preview(self) -> None:
+        self.preview_stale = False
         canvas, t = self.preview, self.t
         canvas.delete("all")
         prices = self.helpers["prices"]() or {}
