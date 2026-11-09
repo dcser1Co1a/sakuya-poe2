@@ -1,5 +1,31 @@
 # Changelog / Список изменений
 
+## 1.4.0
+
+**English**
+
+- **Loot filter by price.** A new Filter page builds `Sakuya.filter` in the game's filter folder from current prices, in six steps:
+  1. your usual filter, added underneath as a copy (works for sure) or as an Import line;
+  2. one to six lines by worth, each with its own name, threshold, colour and how loud it is: loud, an icon, colour only, or your own font size, beam, minimap icon, sound and volume. Sounds can be the game's, a ready pack (chimes, soft, coins) or your own mp3 or wav, with a ▶ to listen. Presets from soft to strict set it all at once;
+  3. whole kinds of goods softer, stricter or left alone;
+  4. single goods always loud, always hidden, or as in your usual filter;
+  5. hiding what is cheap (Exalted, Chaos and Divine are never hidden);
+  6. saving to the game, with the file following the prices by itself if you like.
+  A preview shows how the lines look in the game. Sakuya reads nothing of the game: pick Sakuya in the game's filter options, and press Reload there to see a newer file.
+- **Faster first start.** Mods from poe2db come three pages at a time: about a minute and a half instead of five, jewel mods in seconds.
+
+**Русский**
+
+- **Фильтр по ценам.** Новая страница «Фильтр» собирает `Sakuya.filter` в папке фильтров игры из текущих цен, за шесть шагов:
+  1. ваш обычный фильтр снизу, копией (работает наверняка) или строкой Import;
+  2. от одной до шести строк по стоимости, у каждой своё название, порог, цвет и громкость: громко, значок, только цвет или свои размер шрифта, луч, значок на миникарте, звук и громкость. Звук из игры, готовый набор (колокольчики, мягкие, монеты) или свой mp3 или wav, с кнопкой ▶ послушать. Наборы от мягкого до строгого ставят всё сразу;
+  3. целые виды товаров мягче, строже или как есть;
+  4. отдельные товары всегда громко, всегда скрыть или как в обычном фильтре;
+  5. скрытие дешёвого (Exalted, Chaos и Divine не прячутся никогда);
+  6. сохранение в игру, а при желании файл сам обновляется по ценам.
+  Предпросмотр показывает, как строки будут выглядеть в игре. Sakuya ничего не читает из игры: выберите Sakuya в настройках фильтра в игре, а чтобы игра увидела новый файл, перезагрузите фильтр там же.
+- **Первый запуск быстрее.** Моды с poe2db качаются по три страницы сразу: около полутора минут вместо пяти, моды самоцветов за секунды.
+
 ## 1.3.1
 
 **English**

@@ -99,6 +99,7 @@ from sakura import (
 )
 from build_items import BuildPage
 import level_steps
+import loot_filter
 from drop_sources import DropPage, drop_line, fetch_drops, wiki_page
 from market_demand import APP_USER_AGENT, BUILD_GUIDES, NINJA_API, SCOUT_API, UNIQUE_KINDS, DemandPage, fetch_overview, kinds_due, learn_unique_kinds, read_categories, read_unique, update_demand
 from price_check import UNIQUE_RARITIES, UNIT_LABELS, PriceWindow, SlimScrollbar, TradeSearchPanel, baked_card, best_unit, build_price_index, draw_change, find_price, keep_fonts_ready, prepare_sparks, read_copied_item, spark_image, switch_image, trade_search_url
@@ -123,6 +124,7 @@ LANGUAGES = ("en", "ru")
 UNIQUES_PATH = APP_DIR / "uniques.json"
 BUILDS_PATH = APP_DIR / "builds.json"  # the build codes the player opened, newest first
 DROPS_PATH = APP_DIR / "drops.json"  # where uniques and jewels drop, from poe2wiki
+FILTER_SETTINGS_PATH = APP_DIR / "filter.json"  # the filter builder's lines
 JEWELS_PATH = APP_DIR / "jewels.json"  # the mods jewels can have, with their ranges, from poe2db: for the build page's jewel search, apart from the planner
 DROPS_FORMAT = 2  # bump when drops.json gains something, so a saved file is read again at once; 2 brought the estimated chances
 DEMAND_PATH = APP_DIR / "demand.json"
@@ -145,6 +147,8 @@ REPOE_URL = "https://repoe-fork.github.io/poe2/"
 NINJA_URL = "https://poe.ninja/poe2/api/"
 USER_AGENT = "Mozilla/5.0 (compatible; sakuya)"
 REQUEST_DELAY_SECONDS = 1.5
+POE2DB_WORKERS = 3  # pages of poe2db fetched at once on a full update: a new install has its mod lists in about a minute rather than five
+POE2DB_GAP_SECONDS = 0.8  # each of them pauses this long between its own requests, so the site is asked gently all the same
 PRICE_UPDATE_INTERVAL = timedelta(hours=1)  # poe.ninja refreshes this data about hourly, so asking more often gains nothing
 NINJA_REQUEST_GAP_SECONDS = 3  # the pause between sections within one update
 ACTIVE_SECONDS = 2 * 3600  # a program nobody has touched for this long asks poe.ninja for nothing
@@ -251,6 +255,30 @@ def fetch_bytes(url: str, attempts: int = 5, user_agent: str = USER_AGENT) -> by
 
 def fetch(url: str, attempts: int = 5, user_agent: str = USER_AGENT) -> str:
     return fetch_bytes(url, attempts, user_agent).decode("utf-8", errors="replace")
+
+
+def fetch_all(urls: list[str], on_done=lambda done, total: None, attempts: int = 5, missing_is_none: bool = False) -> list[str | None]:
+    """Many pages of one site, a few at once (POE2DB_WORKERS), each worker pausing between its own requests. The answers come back in the order asked.
+    With missing_is_none, a page that is gone (404) gives None instead of stopping the rest; any other failure stops them all."""
+    from concurrent.futures import ThreadPoolExecutor
+    answers: list[str | None] = [None] * len(urls)
+    done, lock = [0], threading.Lock()
+
+    def one(index: int) -> None:
+        try:
+            answers[index] = fetch(urls[index], attempts=attempts)
+        except urllib.error.HTTPError as error:
+            if not (missing_is_none and error.code == 404):
+                raise
+        with lock:
+            done[0] += 1
+            on_done(done[0], len(urls))
+        time.sleep(POE2DB_GAP_SECONDS)
+
+    with ThreadPoolExecutor(max_workers=POE2DB_WORKERS) as pool:
+        for future in [pool.submit(one, index) for index in range(len(urls))]:
+            future.result()
+    return answers
 
 
 def read_repoe(name: str, known_tag: str | None = None) -> tuple[bytes | None, str | None]:
@@ -796,25 +824,20 @@ def update_data(patches: dict, status) -> None:
     names = re.findall(r'href="/us/([^"#]+)#ModifiersCalc"', modifiers)
     names = [name for name in dict.fromkeys(names) if not UNSUPPORTED_PAGES.search(name)]
     pages, translations = {}, {}
-    for number, name in enumerate(names, 1):
-        status(t("Обновляю моды и веса: {number}/{total}").format(number=number, total=len(names)))
-        view = extract_mods_view(fetch(POE2DB_URL + name))
-        time.sleep(REQUEST_DELAY_SECONDS)
-        ru_html = fetch(POE2DB_RU_URL + name)
-        pages[name] = normalize_page(view, extract_mods_view(ru_html))
+    answers = fetch_all([url for name in names for url in (POE2DB_URL + name, POE2DB_RU_URL + name)],
+                        lambda done, total: status(t("Обновляю моды и веса: {number}/{total}").format(number=(done + 1) // 2, total=len(names))))
+    for number, name in enumerate(names):
+        ru_html = answers[2 * number + 1]
+        pages[name] = normalize_page(extract_mods_view(answers[2 * number]), extract_mods_view(ru_html))
         translations.update(read_names(ru_html))
-        time.sleep(REQUEST_DELAY_SECONDS)
     old = read_json(DATA_PATH) or {}
     own_pages = old.get("names_from_own_pages", {})
     currency_keys = dict(own_pages)
-    for name in RUSSIAN_NAME_PAGES:
-        try:
-            currency_keys.update(read_names(fetch(POE2DB_RU_URL + name, attempts=1)))
-        except urllib.error.HTTPError as error:
-            if error.code != 404:
-                raise
+    for name, page in zip(RUSSIAN_NAME_PAGES, fetch_all([POE2DB_RU_URL + name for name in RUSSIAN_NAME_PAGES], attempts=1, missing_is_none=True)):
+        if page is None:
             log_error("russian names", f"the page {name} is gone; its items now come from their own pages")
-        time.sleep(REQUEST_DELAY_SECONDS)
+        else:
+            currency_keys.update(read_names(page))
     translations.update(currency_keys)
     bases = build_bases(json.loads(read_repoe("base_items.min.json")[0]), pages)
     for base, info in bases.items():
@@ -1498,13 +1521,9 @@ def update_jewel_mods(patches: dict, status, on_changed) -> None:
     stored = read_json(JEWELS_PATH)
     if stored and set(JEWEL_PAGES) <= set(stored.get("pages", {})) and not base_is_due(stored, patches):
         return
-    pages = {}
-    for number, name in enumerate(JEWEL_PAGES, 1):
-        status(t("Обновляю моды самоцветов: {number}/{total}").format(number=number, total=len(JEWEL_PAGES)))
-        view = extract_mods_view(fetch(POE2DB_URL + name))
-        time.sleep(REQUEST_DELAY_SECONDS)
-        pages[name] = {"mods": normalize_page(view, extract_mods_view(fetch(POE2DB_RU_URL + name)))["mods"]}
-        time.sleep(REQUEST_DELAY_SECONDS)
+    answers = fetch_all([url for name in JEWEL_PAGES for url in (POE2DB_URL + name, POE2DB_RU_URL + name)],
+                        lambda done, total: status(t("Обновляю моды самоцветов: {number}/{total}").format(number=(done + 1) // 2, total=len(JEWEL_PAGES))))
+    pages = {name: {"mods": normalize_page(extract_mods_view(answers[2 * number]), extract_mods_view(answers[2 * number + 1]))["mods"]} for number, name in enumerate(JEWEL_PAGES)}
     if not all(page["mods"] for page in pages.values()):
         raise ValueError("a jewel page came without mods, the old ones stay")
     write_json(JEWELS_PATH, {"fetched_at": now_text(), "game_version": patches.get("game_version"), "pages": pages})
@@ -1555,6 +1574,127 @@ DEFAULT_WEIGHT = 1000
 NEW_BASE = "Новая база"
 language = "ru"
 ENGLISH = {
+    # loot filter
+    "Мелкий": "Small",
+    "Средний": "Medium",
+    "Крупный": "Large",
+    "Фильтр": "Filter",
+    "Sakuya делает свой фильтр поверх вашего: по текущим ценам подсвечивает то, что стоит поднять. Всё остальное остаётся как в вашем фильтре.": "Sakuya makes its own filter on top of yours: from current prices it lights up what is worth picking up. Everything else stays as in your filter.",
+    "Так это будет выглядеть в игре": "This is how it will look in the game",
+    "Ваш обычный фильтр": "Your usual filter",
+    "Им показывается всё, что Sakuya не подсвечивает. Выберите тот, которым играете.": "It shows everything Sakuya does not light up. Pick the one you play with.",
+    "Что подсвечивать": "What to light up",
+    "Дешёвое": "Cheap goods",
+    "Только из того, что продаётся по имени: валюта, эссенции, руны, ядра. Exalted, Chaos и Divine не прячутся никогда.": "Only among goods sold by name: currency, essences, runes, cores. Exalted, Chaos and Divine are never hidden.",
+    "Показывать как в обычном фильтре": "Show as the usual filter does",
+    "Прятать то, что дешевле": "Hide what is cheaper than",
+    "Сохранить и включить в игре": "Save it and turn it on in the game",
+    "1. Нажмите «Сохранить фильтр в игру». 2. В игре: Настройки → Игра → Фильтр предметов → Sakuya. 3. Если потом фильтр обновился, а в игре не видно, нажмите там «Перезагрузить».": "1. Press «Save the filter for the game». 2. In the game: Options → Game → Item Filter → Sakuya. 3. If the filter changes later and the game does not show it, press Reload there.",
+    "Сохранить фильтр в игру": "Save the filter for the game",
+    "Обновлять самому, когда меняются цены": "Update it by itself when prices change",
+    "Открыть папку фильтров": "Open the filter folder",
+    "Без обычного фильтра": "No usual filter",
+    "Папки фильтров нет: запустите игру хотя бы раз": "No filter folder yet: start the game once",
+    "Не удалось записать фильтр: {error}": "Could not write the filter: {error}",
+    "Sakuya.filter записан в {time}": "Sakuya.filter written at {time}",
+    "Sakuya.filter уже такой, переписывать нечего": "Sakuya.filter is already like this, nothing to write",
+    "Очень дорогое": "Very valuable",
+    "Дорогое": "Valuable",
+    "Стоит поднять": "Worth picking up",
+    "от": "from",
+    "Громко": "Loud",
+    "Значок": "Icon",
+    "Только цвет": "Colour only",
+    "Нет таких предметов": "No such goods",
+    "луч": "beam",
+    "звук": "sound",
+    "значок": "icon",
+    "только цвет": "colour only",
+    "{name}: {count} предметов": "{name}: {count} goods",
+    "Спрятано: {count} дешёвых": "Hidden: {count} cheap goods",
+    "Каждая вещь попадает в самую дорогую строку, до которой дотягивает её цена. «Громко» — луч, звук и значок на карте, «Значок» — только значок, «Только цвет» — без них. «⚙» — свой звук, шрифт, луч и значок.": "Each item goes to the dearest line its price reaches. «Loud» is a beam, a sound and a minimap icon, «Icon» the icon only, «Colour only» none of them. «⚙» sets your own sound, font, beam and icon.",
+    "＋ Добавить строку": "＋ Add a line",
+    "Строка {number}": "Line {number}",
+    "Своё": "Own",
+    "Шрифт": "Font",
+    "Луч": "Beam",
+    "Звук": "Sound",
+    "Громкость": "Volume",
+    "только при выпадении": "only when it drops",
+    "Без звука": "No sound",
+    "Звук игры": "Game sound",
+    "Свой файл": "Own file",
+    "№ {number}": "No. {number}",
+    "слышно только в игре": "heard in the game only",
+    "Выбрать…": "Choose…",
+    "Свой звук": "Own sound",
+    "Не удалось взять звук: {error}": "Could not take the sound: {error}",
+    "Звук {name} лежит в папке фильтров, в «Sakuya sounds»": "The sound {name} is in the filter folder, in «Sakuya sounds»",
+    "значок: {shape}": "icon: {shape}",
+    "свой звук": "own sound",
+    "Красный": "Red",
+    "Оранжевый": "Orange",
+    "Жёлтый": "Yellow",
+    "Розовый": "Pink",
+    "Фиолетовый": "Purple",
+    "Синий": "Blue",
+    "Голубой": "Cyan",
+    "Зелёный": "Green",
+    "Белый": "White",
+    "Коричневый": "Brown",
+    "Серый": "Grey",
+    "Звезда": "Star",
+    "Ромб": "Diamond",
+    "Круг": "Circle",
+    "Шестиугольник": "Hexagon",
+    "Квадрат": "Square",
+    "Треугольник": "Triangle",
+    "Крест": "Cross",
+    "Луна": "Moon",
+    "Капля": "Raindrop",
+    "Воздушный змей": "Kite",
+    "Пятиугольник": "Pentagon",
+    "Домик": "House",
+    "Большой": "Large",
+    "Маленький": "Small",
+    "Набор:": "Set:",
+    "Звуки:": "Sounds:",
+    "Свои": "Own",
+    "Виды предметов": "Kinds of goods",
+    "Пороги по видам, как смешанная строгость: «Мягче» — вещи этого вида подсвечиваются при вдвое меньшей цене, «Строже» — при вдвое большей, «Не трогать» — их решает обычный фильтр.": "Thresholds by kind, like a mixed strictness: «Softer» lights goods of this kind up at half the price, «Stricter» at twice, «Leave alone» leaves them to the usual filter.",
+    "Отдельные предметы": "Single goods",
+    "Найдите предмет и задайте ему своё правило: оно сильнее порогов и видов.": "Find a good and give it a rule of its own: it beats thresholds and kinds.",
+    "Набор «{name}»: пороги и громкость выставлены, дальше можно подстроить": "Set «{name}»: thresholds and loudness are in place; tune them from here",
+    "Звуки игры слышно только в игре": "Game sounds are heard in the game only",
+    "Всегда громко: {names}": "Always loud: {names}",
+    "Руны": "Runes",
+    "Ядра душ": "Soul cores",
+    "Разлом": "Breach",
+    "Делириум": "Delirium",
+    "Фрагменты": "Fragments",
+    "Экспедиция": "Expedition",
+    "Бездна": "Abyss",
+    "Идолы": "Idols",
+    "Веризий": "Verisium",
+    "Неогранённые камни": "Uncut gems",
+    "Камни родословной": "Lineage gems",
+    "Как все": "Like the rest",
+    "Мягче": "Softer",
+    "Строже": "Stricter",
+    "Не трогать": "Leave alone",
+    "Всегда громко": "Always loud",
+    "Всегда прятать": "Always hide",
+    "Как в обычном фильтре": "As the usual filter",
+    "Мягко": "Soft",
+    "Обычно": "Regular",
+    "Строго": "Strict",
+    "Звуки игры": "Game sounds",
+    "Колокольчики": "Chimes",
+    "Мягкие": "Soft",
+    "Монеты": "Coins",
+    "Подключать:": "Join it:",
+    "Копией (надёжно)": "As a copy (sure)",
+    "Ссылкой Import (файл меньше)": "By an Import line (smaller file)",
     # The build page (build_items.py) and where items drop (drop_sources.py).
     # For your level (level_steps.py).
     "Какие моды искать:": "Which mods to search for:",
@@ -4096,7 +4236,7 @@ APP_NAME = "Sakuya"
 AUTO_LEAGUE, AUTO_HARDCORE = "auto", "auto_hc"
 MOD_NUMBER = re.compile(r"\((\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)\)|(\d+(?:\.\d+)?)")
 PERMANENT_LEAGUES = frozenset({"Standard", "Hardcore"})
-VERSION = "1.3.1"
+VERSION = "1.4.0"
 GITHUB_REPOSITORY = "dcser1Co1a/sakuya-poe2"  # "owner/name"; empty means the program does not look for new versions
 GITHUB_PAGE = f"https://github.com/{GITHUB_REPOSITORY}"
 ISSUES_PAGE = f"{GITHUB_PAGE}/issues/new/choose"
@@ -4113,6 +4253,7 @@ REOPEN_ARGUMENT = "--reopen="
 RESTART_WAIT_MS = 30000
 HOT_COLOR = ACCENT
 NAV_ICONS = {"craft": "Chaos Orb", "build": "Orb of Chance", "drops": "Orb of Alchemy", "prices": "Exalted Orb", "demand": "Mirror of Kalandra", "tools": "Artificer's Orb", "settings": "Blacksmith's Whetstone", "about": "Divine Orb"}
+NAV_ICONS["filter"] = "Orb of Annulment"
 MODE_ICONS = {"budget": "Orb of Transmutation", "endgame": "Perfect Exalted Orb"}
 MODE_TITLES = {"budget": "Дешевле всего", "endgame": "Меньше действий"}
 ROUTE_STEPS_SHOWN = 6
@@ -4709,6 +4850,7 @@ class App:
         self._nav_button(sidebar, "craft", t("Крафт"), lambda: self.show_tab("craft"))
         self._nav_button(sidebar, "build", t("Билд"), lambda: self.show_tab("build"))
         self._nav_button(sidebar, "drops", t("Где падает"), lambda: self.show_tab("drops"))
+        self._nav_button(sidebar, "filter", t("Фильтр"), lambda: self.show_tab("filter"))
         self._nav_button(sidebar, "tools", t("Инструменты"), lambda: self.show_tab("tools"))
         self._nav_button(sidebar, "about", AUTHOR, lambda: self.show_tab("about"), side="bottom")
         self._nav_button(sidebar, "settings", t("Настройки"), lambda: self.show_tab("settings"), side="bottom")
@@ -4737,7 +4879,7 @@ class App:
         # Only the page in use is on screen, since Tk lays out and paints whatever is, seen or not.
         stack = tk.Frame(main, bg=BG)
         stack.pack(fill="both", expand=True)
-        self.pages = {key: tk.Frame(stack, bg=BG) for key in ("craft", "build", "drops", "prices", "demand", "tools", "settings", "about")}
+        self.pages = {key: tk.Frame(stack, bg=BG) for key in ("craft", "build", "drops", "filter", "prices", "demand", "tools", "settings", "about")}
         base_bar = tk.Frame(self.pages["craft"], bg=BG, padx=10)
         base_bar.pack(fill="x", pady=(0, 10))
         self._label(base_bar, t("База"), MUTED, 9).pack(side="left")
@@ -4762,6 +4904,7 @@ class App:
         self._build_demand_page()
         self._build_build_page()
         self._build_drop_page()
+        self._build_filter_page()
         self._build_tools_page()
         self._build_about_page()
 
@@ -4913,7 +5056,7 @@ class App:
             active = key == self.current_tab
             button.config(bg=CHOSEN if active else SIDEBAR, fg=ON_CHOSEN if active else TEXT, activebackground=CHOSEN if active else RAISED, activeforeground=ON_CHOSEN if active else TEXT,
                           font=(FONT, 10, "bold" if active else "normal"), image=icon or "")
-        self.page_title.config(text={"craft": t("Крафт"), "build": t("Билд"), "drops": t("Где падает"), "prices": t("Валюта"), "demand": t("Ходовое"), "tools": t("Инструменты"), "settings": t("Настройки"), "about": AUTHOR}[self.current_tab])
+        self.page_title.config(text={"craft": t("Крафт"), "build": t("Билд"), "drops": t("Где падает"), "filter": t("Фильтр"), "prices": t("Валюта"), "demand": t("Ходовое"), "tools": t("Инструменты"), "settings": t("Настройки"), "about": AUTHOR}[self.current_tab])
 
     def show_tab(self, key: str) -> None:
         page = self.pages[key]
@@ -4936,6 +5079,8 @@ class App:
             self.build_page.render()
         elif key == "drops":
             self.drop_page.render()
+        elif key == "filter":
+            self.filter_page.render()
         elif key == "tools":
             self.tools_page.render()
 
@@ -4981,6 +5126,13 @@ class App:
                    "drops": lambda: self.drops, "language": lambda: language, "show_unique": self._show_unique, "show_base": lambda text: self._show_base_line(self._base_in_line(text), text),
                    "icon": self._drop_icon, "open_link": webbrowser.open, "listings": self._unique_listings}
         self.drop_page = DropPage(self.pages["drops"], colors, t, helpers)
+
+    def _build_filter_page(self) -> None:
+        """The filter builder; its lines live in filter.json."""
+        colors = {"background": BG, "panel": PANEL, "text": TEXT, "soft": SOFT, "muted": MUTED, "raised": RAISED, "selected": CHOSEN, "accent": ACCENT, "border": BORDER}
+        helpers = {"button": self._button, "switch": self._switch, "entry": self._entry, "prices": lambda: self.prices, "show_item": self._show_item, "enable_scrolling": self._enable_scrolling,
+                   "load": lambda: read_json(FILTER_SETTINGS_PATH) or {}, "save": lambda value: write_json(FILTER_SETTINGS_PATH, value)}
+        self.filter_page = loot_filter.FilterPage(self.pages["filter"], colors, t, helpers)
 
     def _unique_listings(self, name: str) -> int | None:
         """How many of this unique are listed, from hot items: a rough sign of how often it drops where nobody has measured a rate."""
@@ -6251,6 +6403,7 @@ class App:
                     self.demand_page.render(force=True)
             elif kind == "prices":
                 self.load_prices()
+                self.filter_page.prices_changed()  # the filter follows new prices when asked to
             elif kind == "icons":
                 self.on_icons_ready()
                 self._refresh_trade_art()

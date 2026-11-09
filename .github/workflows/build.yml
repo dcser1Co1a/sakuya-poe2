@@ -22,7 +22,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
       - name: Tests
-        run: python -W ignore -m unittest test_crafter test_price_check test_trade_search test_market_demand test_tools test_craft_plans test_stability test_build_items test_drop_sources test_level_steps test_game_watch
+        run: python -W ignore -m unittest test_crafter test_price_check test_trade_search test_market_demand test_tools test_craft_plans test_stability test_build_items test_drop_sources test_level_steps test_game_watch test_loot_filter
       - name: Build
         run: pyinstaller --onefile --windowed --noconfirm --name Sakuya --icon assets/sakuya.ico --exclude-module pytest crafter.py
       - uses: actions/upload-artifact@v4
