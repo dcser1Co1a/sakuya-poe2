@@ -2,6 +2,13 @@
 
 Mods and weights come from poe2db, base items from RePoE, prices from poe.ninja.
 """
+import sys
+
+if __name__ == "__main__" and "--watch-game" in sys.argv[1:]:  # the watcher that opens Sakuya with the game: before the heavy libraries, so it stays small
+    import game_watch
+
+    raise SystemExit(game_watch.run(sys.argv[1:]))
+
 import base64
 import bisect
 import ctypes
@@ -20,10 +27,10 @@ import random
 import re
 import shutil
 import subprocess
-import sys
 import threading
 import time
 import tkinter as tk
+import game_watch
 import traceback
 import urllib.error
 import urllib.parse
@@ -1553,6 +1560,13 @@ ENGLISH = {
     "Какие моды искать:": "Which mods to search for:",
     "хотя бы {count} из": "at least {count} of",
     "все из": "all of",
+    "Открывать вместе с Path of Exile 2": "Open with Path of Exile 2",
+    "Не удалось: {error}": "Failed: {error}",
+    "Перезапуск, план крафта сбросится": "Restarts; an open plan is reset",
+    "Сторож без окна стартует с Windows и открывает Sakuya с игрой. Игру не читает.": "A watcher with no window starts with Windows and opens Sakuya with the game. It reads nothing of the game.",
+    "Это работает только в Sakuya.exe": "This works in Sakuya.exe only",
+    "Sakuya откроется, когда запустится Path of Exile 2": "Sakuya will open when Path of Exile 2 starts",
+    "Sakuya больше не открывается вместе с игрой": "Sakuya no longer opens with the game",
     "Обновляю моды самоцветов: {number}/{total}": "Updating jewel mods: {number}/{total}",
     "Отметьте хотя бы один мод": "Tick at least one mod",
     "Ищу: {base}, все из: {mods}": "Looking for: {base}, all of: {mods}",
@@ -4234,7 +4248,8 @@ def close_other_copies() -> None:
         found = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
     kernel32.CloseHandle(snapshot)
     exe_name = os.path.basename(sys.executable)
-    for pid in copies_to_close(under_one_name(processes, exe_name), os.getpid(), os.getppid(), exe_name):
+    watcher = game_watch.watcher_pids(Path(sys.executable), processes)  # the watcher that opens Sakuya with the game is no copy of it
+    for pid in [pid for pid in copies_to_close(under_one_name(processes, exe_name), os.getpid(), os.getppid(), exe_name) if pid not in watcher]:
         handle = kernel32.OpenProcess(PROCESS_CLOSE_ACCESS, False, pid)
         if handle:
             kernel32.TerminateProcess(handle, 0)
@@ -4512,7 +4527,34 @@ class App:
         """Blossom falls while the program gets ready. The loading screen comes first, so that a copy being replaced is gone only once this one is on screen."""
         self.loading = self._loading_screen(ACTIVE_THEME)
         close_other_copies()
+        if self._opens_with_game():  # after an update, or a watcher that ended: it watches again
+            try:
+                game_watch.start_watcher(Path(sys.executable))
+            except OSError:
+                log_error("starting the game watcher")
         prepare_art()
+
+    def _opens_with_game(self) -> bool:
+        return bool(getattr(sys, "frozen", False) and user32) and game_watch.is_registered(Path(sys.executable))
+
+    def toggle_with_game(self) -> None:
+        """Puts the watcher in the user's Run key and starts it, or takes it out; a watcher whose key is gone ends by itself."""
+        exe = Path(sys.executable)
+        if not getattr(sys, "frozen", False):
+            self.with_game_var.set(False)
+            return self.set_status(t("Это работает только в Sakuya.exe"))
+        try:
+            if self.with_game_var.get():
+                game_watch.register(exe)
+                game_watch.start_watcher(exe)
+                self.set_status(t("Sakuya откроется, когда запустится Path of Exile 2"))
+            else:
+                game_watch.unregister()
+                self.set_status(t("Sakuya больше не открывается вместе с игрой"))
+        except OSError as error:
+            log_error("the game watcher setting")
+            self.with_game_var.set(self._opens_with_game())
+            self.set_status(t("Не удалось: {error}").format(error=error))
 
     def _finish_start(self) -> None:
         try:
@@ -5415,6 +5457,10 @@ class App:
         """The checked file takes the running one's place, and the new version starts. It closes this copy itself, as any new start does."""
         exe = Path(sys.executable)
         try:
+            game_watch.stop_watcher(exe)  # it runs from the old file; the new version starts it again
+        except OSError:
+            log_error("stopping the game watcher")
+        try:
             old = swap_in_update(exe, fresh)
         except OSError as error:
             log_error("putting an update in place")
@@ -6053,12 +6099,16 @@ class App:
         self._switch(row, t("Поверх всех окон"), self.topmost_var, self.toggle_topmost).pack(side="left")
         self._label(row, t("Чёрточка вверху справа прячет окно в трей, горячие клавиши продолжают работать."), MUTED, 9).pack(side="left", padx=14)
         self._button(row, t("Выйти из программы"), self.quit).pack(side="right")
+        row = card()
+        self.with_game_var = tk.BooleanVar(value=self._opens_with_game())
+        self._switch(row, t("Открывать вместе с Path of Exile 2"), self.with_game_var, self.toggle_with_game).pack(side="left")
+        self._label(row, t("Сторож без окна стартует с Windows и открывает Sakuya с игрой. Игру не читает."), MUTED, 9).pack(side="left", padx=14)
 
         section(t("Оформление"))
         row = card()
         for key, theme in THEMES.items():
             self._button(row, theme["titles"][0 if language == "ru" else 1], lambda k=key: self.change_theme(k), primary=key == ACTIVE_THEME).pack(side="left", padx=(0, 6))
-        self._label(row, t("Программа перезапустится, открытый план крафта сбросится"), MUTED, 9).pack(side="left", padx=8)
+        self._label(row, t("Перезапуск, план крафта сбросится"), MUTED, 9).pack(side="left", padx=8)
         self.petals_var = tk.BooleanVar(value=self.settings.get("petals", True))
         self._switch(row, t("Лепестки"), self.petals_var, self.toggle_petals).pack(side="right")
 
