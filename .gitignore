@@ -20,6 +20,7 @@ market_sections.json
 drops.json
 builds.json
 jewels.json
+game_watch.json
 *.tmp
 *.broken
 
