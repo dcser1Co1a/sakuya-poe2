@@ -63,8 +63,9 @@ def process_path(pid: int) -> str | None:
         kernel32.CloseHandle(handle)
 
 
-def game_is_running(processes: list[tuple[int, int, str]], path_of=process_path) -> bool:
+def game_is_running(processes: list[tuple[int, int, str]], path_of=None) -> bool:
     """Path of Exile 2 by its file name and, where Windows tells it, by its folder: the first game's programs have the same names."""
+    path_of = path_of or process_path  # looked up when called, so a test's stand-in is the one asked
     for pid, _, name in processes:
         if name.casefold().startswith(GAME_NAME_START) and name.casefold().endswith(".exe"):
             path = path_of(pid)
