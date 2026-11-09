@@ -13,8 +13,8 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - name: Install
@@ -25,7 +25,7 @@ jobs:
         run: python -W ignore -m unittest test_crafter test_price_check test_trade_search test_market_demand test_tools test_craft_plans test_stability test_build_items test_drop_sources test_level_steps test_game_watch test_loot_filter
       - name: Build
         run: pyinstaller --onefile --windowed --noconfirm --name Sakuya --icon assets/sakuya.ico --exclude-module pytest crafter.py
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Sakuya
           path: dist/Sakuya.exe

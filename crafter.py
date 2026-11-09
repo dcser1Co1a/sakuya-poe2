@@ -1579,6 +1579,8 @@ ENGLISH = {
     "Средний": "Medium",
     "Крупный": "Large",
     "Фильтр": "Filter",
+    "бета": "beta",
+    "БЕТА": "BETA",
     "Sakuya делает свой фильтр поверх вашего: по текущим ценам подсвечивает то, что стоит поднять. Всё остальное остаётся как в вашем фильтре.": "Sakuya makes its own filter on top of yours: from current prices it lights up what is worth picking up. Everything else stays as in your filter.",
     "Так это будет выглядеть в игре": "This is how it will look in the game",
     "Ваш обычный фильтр": "Your usual filter",
@@ -4263,6 +4265,7 @@ RESTART_WAIT_MS = 30000
 HOT_COLOR = ACCENT
 NAV_ICONS = {"craft": "Chaos Orb", "build": "Orb of Chance", "drops": "Orb of Alchemy", "prices": "Exalted Orb", "demand": "Mirror of Kalandra", "tools": "Artificer's Orb", "settings": "Blacksmith's Whetstone", "about": "Divine Orb"}
 NAV_ICONS["filter"] = "Orb of Annulment"
+BETA_TABS = ("craft", "filter")  # pages marked as beta in the menu and beside their title: they may still be wrong at times
 MODE_ICONS = {"budget": "Orb of Transmutation", "endgame": "Perfect Exalted Orb"}
 MODE_TITLES = {"budget": "Дешевле всего", "endgame": "Меньше действий"}
 ROUTE_STEPS_SHOWN = 6
@@ -4869,6 +4872,7 @@ class App:
         add_waves(main, BG, padx=10, pady=(0, 8))
         self.page_title = self._label(top, "", TEXT, 15, True)
         self.page_title.pack(side="left")
+        self.beta_badge = tk.Label(top, text=t("БЕТА"), bg=CHOSEN, fg=ON_CHOSEN, font=(FONT, 8, "bold"), padx=6, pady=1)  # shown beside the title of a page in BETA_TABS
         languages = tk.Frame(top, bg=BG)
         languages.pack(side="right")
         for code in ("ru", "en"):
@@ -5054,6 +5058,7 @@ class App:
         self._show_petals()
 
     def _nav_button(self, parent, key: str, title: str, command, side: str = "top") -> None:
+        title = f"{title} · {t('бета')}" if key in BETA_TABS else title
         button = tk.Button(parent, text=f"  {title}", command=command, relief="flat", bd=0, cursor="hand2", anchor="w", padx=10, pady=7, compound="left",
                            bg=SIDEBAR, fg=SOFT, activebackground=RAISED, activeforeground=TEXT, font=(FONT, 10))
         button.pack(side=side, fill="x", padx=8, pady=(1, 8 if side == "bottom" else 1))
@@ -5066,6 +5071,10 @@ class App:
             button.config(bg=CHOSEN if active else SIDEBAR, fg=ON_CHOSEN if active else TEXT, activebackground=CHOSEN if active else RAISED, activeforeground=ON_CHOSEN if active else TEXT,
                           font=(FONT, 10, "bold" if active else "normal"), image=icon or "")
         self.page_title.config(text={"craft": t("Крафт"), "build": t("Билд"), "drops": t("Где падает"), "filter": t("Фильтр"), "prices": t("Валюта"), "demand": t("Ходовое"), "tools": t("Инструменты"), "settings": t("Настройки"), "about": AUTHOR}[self.current_tab])
+        if self.current_tab in BETA_TABS:
+            self.beta_badge.pack(side="left", padx=(10, 0), after=self.page_title)
+        else:
+            self.beta_badge.pack_forget()
 
     def show_tab(self, key: str) -> None:
         page = self.pages[key]
