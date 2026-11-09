@@ -1,5 +1,15 @@
 # Changelog / Список изменений
 
+## 1.4.1
+
+**English**
+
+- **A guide on the Filter page.** Each step has a "?" that opens what it does in plain words, with examples: which usual filter to pick and how it is joined, what the lines, thresholds, loudness and ⚙ mean, kinds and single goods, hiding the cheap, and how to turn the filter on in the game.
+
+**Русский**
+
+- **Гайд на странице «Фильтр».** У каждого шага есть «?»: там простыми словами и с примерами, что он делает — какой обычный фильтр выбрать и как он подключается, что значат строки, пороги, громкость и ⚙, виды и отдельные предметы, скрытие дешёвого и как включить фильтр в игре.
+
 ## 1.4.0
 
 **English**

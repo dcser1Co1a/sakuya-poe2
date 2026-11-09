@@ -386,6 +386,16 @@ def _hex(rgb) -> str:
 
 
 # ----------------------------------------------------------------------------------- the page
+GUIDES = {  # the «?» of each step: what it does, in plain words
+    1: 'Sakuya.filter — это подсветка по ценам, а под ней ваш обычный фильтр. Всё, что Sakuya не подсвечивает, выглядит в игре как раньше.\n• В списке фильтры из папки игры. Нужного нет — скачайте его (NeverSink, FilterBlade и другие), положите в папку (кнопка в шаге 6) и откройте эту страницу заново.\n• «Без обычного фильтра» — останется только подсветка Sakuya, остальное игра покажет как без фильтра.\n• «Копией» — текст вашего фильтра вписывается в конец Sakuya.filter. Работает наверняка. Поменяли свой фильтр — сохраните Sakuya ещё раз или включите обновление в шаге 6.\n• «Ссылкой Import» — вместо текста одна строка со ссылкой на ваш фильтр. Файл меньше, но работает, только если игра понимает Import.',
+    2: 'Строки — это ступени ценности. Например: «Очень дорогое» от 1 div, «Дорогое» от 10 ex, «Стоит поднять» от 2 ex. Вещь за 5 ex попадёт в «Стоит поднять», за 2 div — в «Очень дорогое».\n• Порог — цена, с которой вещь попадает в строку, в ex или div. Цены те же, что на странице «Цены», для выбранной лиги.\n• Цвет — цвет подписи и рамки на земле.\n• «Громко» — луч, звук и значок на миникарте. «Значок» — только значок. «Только цвет» — тихо, одним цветом.\n• «⚙» — всё у строки по-своему: размер шрифта, луч (с галочкой «только при выпадении» он мигнёт и погаснет), значок на миникарте, звук из игры или свой mp3 или wav (▶ — послушать) и громкость.\n• «Набор» ставит пороги и громкость всем строкам сразу: «Мягко» подсвечивает больше, «Строго» — только дорогое и прячет мелочь дешевле 10 ex. Названия и цвета строк остаются ваши.\n• «Звуки» — готовый набор звуков сразу на все строки.\n• «＋ Добавить строку» — до шести строк, «✕» убирает строку.',
+    3: 'Тонкая настройка по видам товаров. Для вещей этого вида пороги из шага 2 меняются:\n• «Мягче» — порог вдвое ниже: эссенция за 1 ex подсветится как вещь за 2 ex.\n• «Строже» — порог вдвое выше: подсветится только то, что дороже.\n• «Не трогать» — Sakuya этот вид не подсвечивает и не прячет, его решает ваш обычный фильтр.\n• «Как все» — пороги как в шаге 2.\nНапример: крафтите и эссенции нужны — «Мягче»; руны не интересны — «Не трогать».',
+    4: 'Правило для одного предмета, сильнее порогов и видов. Начните вводить название по-русски или по-английски и выберите из подсказок.\n• «Всегда громко» — подсветить, даже если он дешёвый (например, нужная вам руна или сфера для крафта).\n• «Всегда прятать» — не показывать вовсе.\n• «Как в обычном фильтре» — Sakuya его не трогает.\nПравило можно поменять в списке, «✕» его убирает.',
+    5: 'Можно спрятать мелочь, чтобы она не мусорила на земле. Например, «Прятать то, что дешевле 2 ex» — Sakuya скроет валюту, эссенции, руны и прочее, что стоит меньше 2 ex.\n• Прячется только то, что продаётся по имени и у чего есть цена. Редкие, уникальные и прочие вещи решает ваш обычный фильтр.\n• Exalted, Chaos и Divine не прячутся никогда.\n• «Показывать как в обычном фильтре» — Sakuya ничего не прячет.',
+    6: '1. «Сохранить фильтр в игру» — Sakuya запишет Sakuya.filter в папку фильтров игры (Документы\\My Games\\Path of Exile 2).\n2. В игре: Esc → Настройки → Игра → Фильтр предметов → выберите Sakuya.\n3. Игра читает фильтр, когда его выбирают. Чтобы увидеть свежий файл, нажмите в тех же настройках кнопку обновления фильтра рядом со списком.\n• «Обновлять самому, когда меняются цены» — Sakuya перепишет файл, когда скачает новые цены, и заодно после ваших правок на этой странице.\n• «Открыть папку фильтров» — там Sakuya.filter, ваши фильтры и папка «Sakuya sounds» со звуками.\n• Не понравилось — просто выберите в игре свой прежний фильтр, он не менялся.',
+}
+
+
 class FilterPage:
     """«Filter», step by step: the usual filter that stays, what to light up and how, what to do with the cheap, and saving it for the game."""
 
@@ -393,11 +403,14 @@ class FilterPage:
         self.colors, self.t, self.helpers = colors, translate, helpers
         self.settings = clean_settings(helpers["load"]())
         self.open_details: set[int] = set()
+        self.open_help: set[int] = set()  # steps whose «?» is open; they stay open while the page is rebuilt
         page = tk.Frame(parent, bg=colors["background"], padx=10)
         page.pack(fill="both", expand=True)
         self.page = page
-        tk.Label(page, text=self.t("Sakuya делает свой фильтр поверх вашего: по текущим ценам подсвечивает то, что стоит поднять. Всё остальное остаётся как в вашем фильтре."),
-                 bg=colors["background"], fg=colors["soft"], font=(BODY, 10), justify="left", anchor="w", wraplength=1000).pack(fill="x", pady=(0, 8))
+        intro = tk.Label(page, text=self.t("Sakuya делает свой фильтр поверх вашего: по текущим ценам подсвечивает то, что стоит поднять. Всё остальное остаётся как в вашем фильтре.") + " " + self.t('Нажмите «?» у любого шага — там подробно, что он делает.'),
+                         bg=colors["background"], fg=colors["soft"], font=(BODY, 10), justify="left", anchor="w", wraplength=900)
+        intro.pack(fill="x", pady=(0, 8))
+        intro.bind("<Configure>", lambda event: intro.configure(wraplength=max(event.width - 8, 200)))  # wraps at the window's width, so no words run past its edge
         self.status = tk.Label(page, bg=colors["background"], fg=colors["soft"], font=(BODY, 9), anchor="w")
         self.status.pack(side="bottom", fill="x", pady=(6, 0))
         body = tk.Frame(page, bg=colors["background"])
@@ -483,7 +496,7 @@ class FilterPage:
 
     # ---- drawing
     def _step(self, number: int, title: str, hint: str = "") -> tk.Frame:
-        """One numbered step: a card with its number, title and a line of help."""
+        """One numbered step: a card with its number, title, a line of help, and a «?» that opens the step's guide in plain words."""
         colors = self.colors
         card = tk.Frame(self.steps, bg=colors["panel"], padx=12, pady=8)
         card.pack(fill="x", pady=(0, 6))
@@ -495,6 +508,26 @@ class FilterPage:
             tk.Label(card, text=hint, bg=colors["panel"], fg=colors["muted"], font=(BODY, 9), anchor="w", justify="left", wraplength=500).pack(fill="x", pady=(4, 0))
         inner = tk.Frame(card, bg=colors["panel"])
         inner.pack(fill="x", pady=(6, 0))
+        if number in GUIDES:
+            guide = tk.Label(card, text=self.t(GUIDES[number]), bg=colors["raised"], fg=colors["text"], font=(BODY, 9), anchor="w", justify="left", wraplength=500, padx=10, pady=8)
+            mark = tk.Label(head, text=" ? ", bg=colors["raised"], fg=colors["accent"], font=(BODY, 10, "bold"), cursor="hand2")
+            mark.pack(side="right")
+
+            def show(opened: bool) -> None:
+                mark.config(text=" ✕ " if opened else " ? ")
+                if opened:
+                    guide.pack(fill="x", pady=(6, 0), before=inner)
+                else:
+                    guide.pack_forget()
+
+            def toggle(_=None) -> None:
+                self.open_help.symmetric_difference_update({number})
+                show(number in self.open_help)
+
+            mark.bind("<Button-1>", toggle)
+            mark.bind("<Enter>", lambda _: mark.config(bg=colors["selected"], fg=colors.get("on_selected", colors["text"])))
+            mark.bind("<Leave>", lambda _: mark.config(bg=colors["raised"], fg=colors["accent"]))
+            show(number in self.open_help)
         return inner
 
     def _combo(self, parent, values: list[str], current: str, width: int, chose) -> ttk.Combobox:

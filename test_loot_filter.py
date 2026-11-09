@@ -174,7 +174,7 @@ class FilterTests(unittest.TestCase):
     def test_every_caption_has_an_english_version(self):
         captions = {"Фильтр", *(tier["name"] for tier in loot_filter.DEFAULT_TIERS), *loot_filter.LOUDNESS_TITLES.values(), *loot_filter.GAME_COLORS.values(),
                     *loot_filter.ICON_SHAPES.values(), *loot_filter.ICON_SIZES.values(), *loot_filter.KIND_TITLES.values(), *(title for title, _ in loot_filter.KIND_RULES.values()),
-                    *loot_filter.ITEM_RULES.values(), *(title for title, _, _ in loot_filter.PRESETS.values()), *loot_filter.SOUND_PACKS.values(), *loot_filter.LINKS.values()}
+                    *loot_filter.ITEM_RULES.values(), *(title for title, _, _ in loot_filter.PRESETS.values()), *loot_filter.SOUND_PACKS.values(), *loot_filter.LINKS.values(), *loot_filter.GUIDES.values()}
         for node in ast.walk(ast.parse(Path(loot_filter.__file__).read_text(encoding="utf-8"))):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "t" and node.args and isinstance(node.args[0], ast.Constant):
                 captions.add(node.args[0].value)
