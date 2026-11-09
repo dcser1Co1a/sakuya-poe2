@@ -31,6 +31,7 @@ A desktop helper for **Path of Exile 2** on Windows: a crafting planner, price c
 - **Tools.** Saved searches, a deal journal, exchange turnover, a mod reference, a Waystone search line and a map timer.
 - **Price watches.** Set a limit on any priced item, and a tray notice tells you when the price gets there. It uses the prices the program already downloads.
 - **Themes.** Gold (the first one you see), Night sakura, Ink, Washi and Murasaki. Pick one in Settings; your choice is kept.
+- **Opens with the game.** Turn on "Open with Path of Exile 2" in Settings, and Sakuya opens when the game starts. It only sees which programs are running.
 - **History.** The last 50 items you price-checked, with the price then and now and what they are worth together, kept on your computer.
 - **Saved craft goals.** Save the mods you want on a base and open them again in one click.
 - **Base search.** Type part of a base name in either language and pick it from a list grouped by kind.
@@ -152,6 +153,7 @@ This product isn't affiliated with or endorsed by Grinding Gear Games in any way
 - **Инструменты.** Закладки, журнал сделок, оборот биржи, справочник модов, строка поиска для путевых камней и секундомер.
 - **Слежение за ценой.** Поставьте порог на любой предмет с ценой, и уведомление в трее скажет, когда цена до него дойдёт. Используются цены, которые программа и так скачивает.
 - **Темы.** «Золото» (с неё программа начинается), «Ночная сакура», «Тушь», «Васи» и «Мурасаки». Выбираются в Настройках и запоминаются.
+- **Открывается с игрой.** Включите в Настройках «Открывать вместе с Path of Exile 2», и Sakuya откроется, когда запустится игра. Программа видит только список запущенных программ.
 - **История.** Последние 50 проверенных предметов с ценой тогда и сейчас и общей суммой. Лежит только у вас на компьютере.
 - **Сохранённые цели крафта.** Сохраните нужные моды на базу и открывайте их в один клик.
 - **Поиск базы.** Введите часть названия на любом языке и выберите из списка, разбитого по видам предметов.

@@ -1,5 +1,15 @@
 # Changelog / Список изменений
 
+## 1.3.1
+
+**English**
+
+- **Open with the game.** Settings, Window, "Open with Path of Exile 2": a small watcher with no window starts with Windows and opens Sakuya when the game starts, once per start; if Sakuya is already open, it leaves it be. It only sees which programs are running, as Task Manager shows them, and reads nothing of the game. Turn the switch off and the watcher removes itself.
+
+**Русский**
+
+- **Открывать вместе с игрой.** Настройки, «Окно», «Открывать вместе с Path of Exile 2»: маленький сторож без окна запускается с Windows и открывает Sakuya, когда запускается игра, один раз на каждый запуск; если Sakuya уже открыта, не трогает её. Он видит только список запущенных программ, как в диспетчере задач, и ничего не читает из игры. Выключите тумблер, и сторож уберёт себя сам.
+
 ## 1.3.0
 
 **English**
