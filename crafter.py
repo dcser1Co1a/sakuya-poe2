@@ -1619,6 +1619,8 @@ ENGLISH = {
     "только цвет": "colour only",
     "{name}: {count} предметов": "{name}: {count} goods",
     "Спрятано: {count} дешёвых": "Hidden: {count} cheap goods",
+    "На земле: всё вместе": "On the ground: all together",
+    "серые — решает обычный фильтр, зачёркнутые — спрятаны": "grey: left to the usual filter, struck out: hidden",
     "Каждая вещь попадает в самую дорогую строку, до которой дотягивает её цена. «Громко» — луч, звук и значок на карте, «Значок» — только значок, «Только цвет» — без них. «⚙» — свой звук, шрифт, луч и значок.": "Each item goes to the dearest line its price reaches. «Loud» is a beam, a sound and a minimap icon, «Icon» the icon only, «Colour only» none of them. «⚙» sets your own sound, font, beam and icon.",
     "＋ Добавить строку": "＋ Add a line",
     "Строка {number}": "Line {number}",

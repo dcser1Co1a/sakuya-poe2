@@ -436,6 +436,8 @@ class FilterPage:
         self.counts.pack(side="bottom", fill="x", pady=(8, 0))  # first, so a small screen takes its room from the preview rather than from these lines
         self.preview = tk.Canvas(side, bg="#141210", highlightthickness=0, height=200)
         self.preview.pack(fill="both", expand=True, pady=(8, 0))
+        self.preview_size = (0, 0)
+        self.preview.bind("<Configure>", self._preview_resized)
 
     # ---- settings
     def _save(self) -> None:
@@ -1002,6 +1004,67 @@ class FilterPage:
         if loud:
             lines.insert(0, t("Всегда громко: {names}").format(names=", ".join(show(name) for name in loud[:4]) + (" …" if len(loud) > 4 else "")))
         if hidden or hidden_by_hand:
-            canvas.create_text(24, y + 4, text=t("Спрятано: {count} дешёвых").format(count=len(hidden) + len(hidden_by_hand)), font=(BODY, 9), anchor="w", fill="#7c7466")
-        canvas.config(height=max(200, y + 20))
+            lines.append(t("Спрятано: {count} дешёвых").format(count=len(hidden) + len(hidden_by_hand)))
+        self._draw_ground(y, tiers, hidden + hidden_by_hand, loud, rate, prices)
         self.counts.config(text="\n".join(lines))
+
+    def _preview_resized(self, event) -> None:
+        if (event.width, event.height) != self.preview_size:
+            self.preview_size = (event.width, event.height)
+            self._draw_preview()
+
+    def _draw_ground(self, top: int, tiers: list[list[str]], hidden: list[str], loud: list[str], rate, prices: dict) -> None:
+        """Below the samples, everything together as on the ground after a fight: a few goods of each line in its look, the goods set loud by hand,
+        some left to the usual filter (grey) and some hidden (struck out), mixed as they would drop."""
+        canvas, t, show = self.preview, self.t, self.helpers["show_item"]
+        width, height = max(canvas.winfo_width(), 240), max(canvas.winfo_height(), 200)
+        if height - top < 70:
+            return
+        canvas.create_line(12, top, width - 12, top, fill="#3a342b")
+        canvas.create_text(14, top + 12, text=t("На земле: всё вместе"), font=(BODY, 9, "bold"), anchor="w", fill="#d9ab4f")
+        order = dearest_first(self.settings, rate)
+        groups = []
+        if loud and order:
+            first = self.settings["tiers"][order[0]]
+            groups.append([(name, {**first, **loudness_marks("loud", first)}) for name in loud[:3]])
+        groups += [[(name, self.settings["tiers"][position]) for name in (tiers[position][1:5] or tiers[position][:1])] for position in order]  # the samples above are not repeated
+        placed = {name for names in tiers for name in names} | set(hidden) | set(loud)
+        worth = filtered_names(prices.get("prices_in_divine") or {})
+        usual = sorted((name for name in worth if name not in placed), key=lambda name: -worth[name])[:4]
+        groups.append([(name, "usual") for name in usual])
+        groups.append([(name, "hidden") for name in hidden[:3]])
+        goods = []
+        while any(groups):  # one from each group in turn: drops come mixed
+            for group in groups:
+                if group:
+                    goods.append(group.pop(0))
+        x, y, row_height, bottom = 14, top + 40, 0, height - 30
+        for name, look in goods:
+            text = show(name)
+            text = text if len(text) <= 20 else text[:19] + "…"
+            if look in ("usual", "hidden"):
+                font = (BODY, 8, "overstrike") if look == "hidden" else (BODY, 8)
+                label = canvas.create_text(0, 0, text=text, font=font, anchor="nw", fill="#5f584c" if look == "hidden" else "#c8c8c8")
+            else:
+                back, text_rgb, border, _ = COLORS[look["color"]]
+                label = canvas.create_text(0, 0, text=text, font=(BODY, max(8, look["font"] // 4), "bold"), anchor="nw", fill=_hex(text_rgb))
+            x1, y1, x2, y2 = canvas.bbox(label)
+            w, h = x2 - x1 + 14, y2 - y1 + 6
+            if x + w > width - 10:
+                x, y, row_height = 14, y + row_height + 10, 0
+            if y + h > bottom:
+                canvas.delete(label)
+                break
+            canvas.coords(label, x + 7, y + 3)
+            if look == "usual":
+                canvas.create_rectangle(x, y, x + w, y + h, fill="#000000", outline="")
+            elif look != "hidden":
+                canvas.create_rectangle(x, y, x + w, y + h, fill=_hex(back), outline=_hex(border), width=2)
+                if look["beam"]:
+                    canvas.create_line(x + w / 2, y - 1, x + w / 2, y - 8, fill=_hex(BEAM_SHADES[look["beam"]["color"]]), width=3)
+                if look["icon"]:
+                    canvas.create_oval(x + w - 5, y - 5, x + w + 3, y + 3, fill=_hex(BEAM_SHADES.get(look["icon"]["color"], (240, 240, 240))), outline="#141210")
+            canvas.tag_raise(label)
+            x += w + 8
+            row_height = max(row_height, h)
+        canvas.create_text(14, height - 14, text=t("серые — решает обычный фильтр, зачёркнутые — спрятаны"), font=(BODY, 8), anchor="w", fill="#7c7466")
