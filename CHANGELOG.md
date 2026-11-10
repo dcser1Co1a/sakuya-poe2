@@ -1,5 +1,21 @@
 # Changelog / Список изменений
 
+## 1.4.3
+
+**English**
+
+- **Easier to trust.** Each release now carries a proof signed by GitHub that `Sakuya.exe` was built by this repository's Actions from a public commit (`gh attestation verify Sakuya.exe -R dcser1Co1a/sakuya-poe2`), and its SHA-256. The README lists exactly what the program does on your computer and how to check the file, or run it from source instead.
+- **The Filter preview shows everything together** as it would lie on the ground: a few goods of each line, the ones set loud by hand, grey ones left to your usual filter and struck-out hidden ones.
+- **Craft and Filter are marked beta** in the menu and beside the page title.
+- **Faster Build and Filter tabs.** Switching to them takes about a third of the time it did: they are drawn again only when new data came, and filter steps out of view cost nothing.
+
+**Русский**
+
+- **Проще доверять.** У каждого релиза теперь есть подписанное GitHub подтверждение, что `Sakuya.exe` собран сборкой этого репозитория из открытого коммита (`gh attestation verify Sakuya.exe -R dcser1Co1a/sakuya-poe2`), и его SHA-256. В README по пунктам написано, что программа делает на компьютере и как проверить файл или запустить её из исходников.
+- **Предпросмотр фильтра показывает всё вместе,** как это лежало бы на земле: по несколько товаров каждой строки, громкие вручную, серые — на усмотрение обычного фильтра и зачёркнутые спрятанные.
+- **Крафт и Фильтр помечены как бета** в меню и рядом с названием страницы.
+- **Вкладки «Билд» и «Фильтр» открываются быстрее,** примерно втрое: они перерисовываются, только если пришли новые данные, а шаги фильтра вне вида ничего не стоят.
+
 ## 1.4.2
 
 **English**

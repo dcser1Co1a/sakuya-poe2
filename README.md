@@ -2,7 +2,7 @@
 
 A desktop helper for **Path of Exile 2** on Windows: a crafting planner, price checks, a build's gear from a Path of Building code with similar items for your level, jewel searches, where uniques drop, and market lists, in one small window that lives in the tray. English and Russian game clients are supported.
 
-**[⬇ Download Sakuya.exe](https://github.com/dcser1Co1a/sakuya-poe2/releases/latest/download/Sakuya.exe)** · free · no login · does not connect to the game · Windows 10 and 11
+**[⬇ Download Sakuya.exe](https://github.com/dcser1Co1a/sakuya-poe2/releases/latest/download/Sakuya.exe)** · free · open source · no login · does not connect to the game · Windows 10 and 11 · [is it safe?](#is-it-safe)
 
 [По-русски ниже](#по-русски)
 
@@ -82,8 +82,30 @@ Some things cannot update by themselves. A new crafting mechanic, or a new omen'
 - **It never contacts the trade site.** A search opens in your own browser, and you search there yourself.
 - **What it downloads:** mods from poe2db, items and art from RePoE, prices from poe.ninja's public economy API, poe2scout and GGG's public exchange data, where items drop from poe2wiki.net, the game's build number from SteamCMD, the list of trade stats from GitHub. It does not use poe.ninja's build or character data, which are closed to programs. Near the game it reads one thing: the build number in Steam's record of the installed game, to notice patches. It writes there only when you save a filter: `Sakuya.filter`, and sounds you picked, in the game's filter folder.
 - **Nothing about you is sent anywhere.** Settings, notes and history stay in the program's folder.
-- **Open source.** The `Sakuya.exe` on Releases is built from this code by GitHub Actions, and the build log is public.
-- **Why Windows warns.** The file is not signed, as signing costs money, so SmartScreen shows "Windows protected your PC": click **More info**, then **Run anyway**. A few antiviruses mistake unsigned Python programs for threats. You can read the code, or build it yourself as shown below.
+- **Open source.** The `Sakuya.exe` on Releases is built from this code by GitHub Actions, the build log is public, and GitHub signs a proof of which commit each release file was built from (see [Check the file](#check-the-file)).
+- **Why Windows warns.** The file is not signed, as signing costs money, so SmartScreen shows "Windows protected your PC": click **More info**, then **Run anyway**. A few antiviruses mistake unsigned Python programs packed into one file for threats. You can read the code, check the file as shown below, or run it from source.
+
+### What it does on your computer
+
+| What | When | Why |
+|---|---|---|
+| Writes files in its own folder: settings, prices, mods, pictures, logs | Always | Its data |
+| Writes `Sakuya.filter` and the sounds you picked in `Documents\My Games\Path of Exile 2` | Only when you save a filter | The game reads filters from there |
+| Adds the value `Sakuya` under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` | Only while "Open with Path of Exile 2" is on. Turning it off removes it | To start with Windows and wait for the game |
+| Looks at the list of running programs, their names and paths, as Task Manager shows them | Every 5 seconds, only while that option is on | To see the game start |
+| Registers its hotkeys with Windows (`RegisterHotKey`) | While it runs | `Ctrl+E`, `Ctrl+D`, `Ctrl+R`. It is not a keyboard hook: other keys never reach it |
+| Reads the clipboard | Right after its own `Ctrl+Alt+C`, or when you click Paste | Item text and build codes |
+| Replaces its own `Sakuya.exe` | Only when you click Update, after checking the file against the checksum GitHub publishes | Updates |
+
+It does not read browsers, passwords, cookies, Discord, Telegram or Steam accounts, or any files outside its folder, except three: the build number in Steam's record of the game, the game's filter folder when the Filter page is open (to list your filters and copy your usual one under Sakuya's lines), and a sound file you pick yourself. Everything it downloads comes from the sites listed above, and nothing about you is sent anywhere.
+
+### Check the file
+
+1. **Download it only from [Releases](../../releases) of this page.** A file sent in a chat can be anything, even under the same name.
+2. **Compare the checksum.** Each release lists the SHA-256 of `Sakuya.exe`. In PowerShell: `Get-FileHash Sakuya.exe`.
+3. **Check where it was built.** With the [GitHub CLI](https://cli.github.com): `gh attestation verify Sakuya.exe -R dcser1Co1a/sakuya-poe2`. GitHub confirms that the file was built by this repository's Actions from a commit you can read, not on someone's computer.
+4. **Scan it.** Drop the file on [VirusTotal](https://www.virustotal.com). One or two engines out of seventy flagging an unsigned Python program is a known false alarm; a real stealer is flagged by dozens.
+5. **Or do not run the exe at all.** Install [Python 3.13](https://www.python.org/downloads/) or newer, download this code, then `pip install -r requirements.txt` and `python crafter.py`. It is the same program, run from the code you see here.
 
 Grinding Gear Games does not approve or endorse any third-party tool, so nobody can promise anything in their name. Sakuya is made to keep within their [third-party policy](https://www.pathofexile.com/developer/docs): it plays nothing for you, reads nothing from the game and does not use the trade site. Read the policy and decide for yourself.
 
@@ -93,7 +115,7 @@ Python 3.13 or newer on Windows:
 
 ```
 pip install -r requirements.txt pyinstaller
-python -W ignore -m unittest test_crafter test_price_check test_trade_search test_market_demand test_tools test_craft_plans test_stability test_build_items test_drop_sources
+python -W ignore -m unittest test_crafter test_price_check test_trade_search test_market_demand test_tools test_craft_plans test_stability test_build_items test_drop_sources test_level_steps test_game_watch test_loot_filter
 pyinstaller --onefile --windowed --name Sakuya --icon assets/sakuya.ico crafter.py
 ```
 
@@ -134,7 +156,7 @@ This product isn't affiliated with or endorsed by Grinding Gear Games in any way
 
 Помощник для **Path of Exile 2** под Windows: планировщик крафта, проверка цен, снаряжение билда по коду Path of Building с похожими вещами под ваш уровень, поиск самоцветов, где падают уники и списки рынка, в одном небольшом окне, которое живёт в трее. Работает с русским и английским клиентом игры.
 
-**[⬇ Скачать Sakuya.exe](https://github.com/dcser1Co1a/sakuya-poe2/releases/latest/download/Sakuya.exe)** · бесплатно · без входа в аккаунт · к игре не подключается · Windows 10 и 11
+**[⬇ Скачать Sakuya.exe](https://github.com/dcser1Co1a/sakuya-poe2/releases/latest/download/Sakuya.exe)** · бесплатно · открытый код · без входа в аккаунт · к игре не подключается · Windows 10 и 11 · безопасность и проверка файла — в разделе «Это безопасно?» ниже
 
 Короткое видео и снимки экрана — в начале страницы.
 
@@ -176,8 +198,30 @@ This product isn't affiliated with or endorsed by Grinding Gear Games in any way
 - **Не обращается к сайту торговли.** Поиск открывается в вашем браузере, ищете там вы сами.
 - **Что скачивает:** моды с poe2db, предметы и картинки с RePoE, цены через открытый экономический API poe.ninja, с poe2scout и из публичных данных биржи GGG, где что падает — с poe2wiki.net, номер сборки игры со SteamCMD, список модов для поиска с GitHub. Данные билдов и персонажей poe.ninja не использует: они закрыты для программ. Рядом с игрой читает одно: номер сборки в записи Steam об установленной игре, чтобы заметить патч. Пишет туда, только когда вы сохраняете фильтр: `Sakuya.filter` и выбранные звуки в папке фильтров игры.
 - **О вас ничего никуда не отправляется.** Настройки, заметки и история лежат в папке программы.
-- **Открытый код.** `Sakuya.exe` в Releases собирает из этого кода GitHub Actions, журнал сборки открыт.
-- **Почему ругается Windows.** Файл не подписан: подпись стоит денег. SmartScreen покажет «Windows защитила ваш компьютер»: нажмите **Подробнее**, затем **Выполнить в любом случае**. Некоторые антивирусы по ошибке принимают неподписанные программы на Python за угрозу. Код можно прочитать или собрать программу самому.
+- **Открытый код.** `Sakuya.exe` в Releases собирает из этого кода GitHub Actions, журнал сборки открыт, а GitHub подписывает подтверждение, из какого коммита собран каждый файл релиза (см. «Как проверить файл» ниже).
+- **Почему ругается Windows.** Файл не подписан: подпись стоит денег. SmartScreen покажет «Windows защитила ваш компьютер»: нажмите **Подробнее**, затем **Выполнить в любом случае**. Некоторые антивирусы по ошибке принимают неподписанные программы на Python, собранные в один файл, за угрозу. Код можно прочитать, файл проверить, как написано ниже, или запустить программу из исходников.
+
+**Что программа делает на компьютере**
+
+| Что | Когда | Зачем |
+|---|---|---|
+| Пишет файлы в своей папке: настройки, цены, моды, картинки, журналы | Всегда | Это её данные |
+| Пишет `Sakuya.filter` и выбранные звуки в `Документы\My Games\Path of Exile 2` | Только когда вы сохраняете фильтр | Игра берёт фильтры оттуда |
+| Добавляет значение `Sakuya` в `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` | Только пока включено «Открывать вместе с Path of Exile 2». Выключение его удаляет | Чтобы запуститься с Windows и ждать игру |
+| Смотрит список запущенных программ: имена и пути, как в диспетчере задач | Раз в 5 секунд, только пока включён этот же пункт | Чтобы заметить запуск игры |
+| Регистрирует свои горячие клавиши в Windows (`RegisterHotKey`) | Пока работает | `Ctrl+E`, `Ctrl+D`, `Ctrl+R`. Это не перехват клавиатуры: остальные клавиши до неё не доходят |
+| Читает буфер обмена | Сразу после своего `Ctrl+Alt+C` или когда вы нажимаете «Вставить» | Текст предмета и коды билдов |
+| Заменяет свой `Sakuya.exe` | Только по кнопке «Обновить», после сверки с контрольной суммой, которую публикует GitHub | Обновление |
+
+Не читает браузеры, пароли, cookies, аккаунты Discord, Telegram и Steam и вообще файлы вне своей папки, кроме трёх: номера сборки в записи Steam об игре, папки фильтров игры, когда открыта страница «Фильтр» (чтобы показать ваши фильтры и скопировать обычный под строки Sakuya), и звукового файла, который вы выбрали сами. Всё скачивает с перечисленных выше сайтов, а о вас ничего никуда не отправляет.
+
+**Как проверить файл**
+
+1. **Скачивайте только из [Releases](../../releases) этой страницы.** Файл, присланный в чат, может оказаться чем угодно, даже с тем же именем.
+2. **Сверьте контрольную сумму.** У каждого релиза указан SHA-256 файла `Sakuya.exe`. В PowerShell: `Get-FileHash Sakuya.exe`.
+3. **Проверьте, где собран файл.** С [GitHub CLI](https://cli.github.com): `gh attestation verify Sakuya.exe -R dcser1Co1a/sakuya-poe2`. GitHub подтвердит, что файл собран сборкой этого репозитория из коммита, который можно прочитать, а не на чьём-то компьютере.
+4. **Проверьте антивирусами.** Перетащите файл на [VirusTotal](https://www.virustotal.com). Один-два движка из семидесяти на неподписанную программу на Python — известная ложная тревога; настоящий стилер ловят десятки.
+5. **Или не запускайте exe вообще.** Поставьте [Python 3.13](https://www.python.org/downloads/) или новее, скачайте этот код и выполните `pip install -r requirements.txt` и `python crafter.py`. Это та же программа, запущенная из кода, который вы видите здесь.
 
 Grinding Gear Games не одобряет никакие сторонние программы, поэтому обещать что-то от их имени не может никто. Sakuya сделана так, чтобы оставаться в рамках их [правил для сторонних программ](https://www.pathofexile.com/developer/docs): ничего не делает в игре за вас, ничего не читает из игры и не обращается к сайту торговли.
 

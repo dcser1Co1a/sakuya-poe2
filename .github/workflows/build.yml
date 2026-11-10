@@ -8,6 +8,8 @@ on:
 
 permissions:
   contents: write  # a pushed version tag publishes a release
+  id-token: write  # signs the proof of where the release file was built
+  attestations: write
 
 jobs:
   windows:
@@ -29,8 +31,34 @@ jobs:
         with:
           name: Sakuya
           path: dist/Sakuya.exe
+      - name: Prove where the file was built
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/Sakuya.exe
+      - name: Send the file to VirusTotal
+        # Runs only when the repository has a VT_API_KEY secret (a free VirusTotal account gives one).
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          VT_API_KEY: ${{ secrets.VT_API_KEY }}
+        run: |
+          if [ -z "$VT_API_KEY" ]; then echo "No VT_API_KEY secret, skipped."; exit 0; fi
+          upload=$(curl -sf -H "x-apikey: $VT_API_KEY" https://www.virustotal.com/api/v3/files/upload_url | python -c "import json, sys; print(json.load(sys.stdin)['data'])")
+          curl -sf -H "x-apikey: $VT_API_KEY" -F "file=@dist/Sakuya.exe" "$upload" > /dev/null
+          echo "VT_SENT=1" >> "$GITHUB_ENV"
       - name: Publish the release
         if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" dist/Sakuya.exe --generate-notes
+        run: |
+          hash=$(sha256sum dist/Sakuya.exe | cut -d' ' -f1)
+          {
+            echo "### Check the file · Проверить файл"
+            echo
+            echo "- SHA-256: \`$hash\` (PowerShell: \`Get-FileHash Sakuya.exe\`)"
+            echo "- Built here by GitHub Actions from commit ${GITHUB_SHA::7} · собран здесь GitHub Actions: \`gh attestation verify Sakuya.exe -R $GITHUB_REPOSITORY\`"
+            if [ -n "$VT_SENT" ]; then echo "- VirusTotal: https://www.virustotal.com/gui/file/$hash"; fi
+          } > check.md
+          gh release create "$GITHUB_REF_NAME" dist/Sakuya.exe --notes-file check.md
