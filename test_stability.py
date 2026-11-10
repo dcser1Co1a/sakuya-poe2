@@ -1548,5 +1548,59 @@ class StopwatchScreenTests(unittest.TestCase):
         self.assertEqual(page.timer_label.drawn, drawn)
 
 
+class LeftoverTests(unittest.TestCase):
+    def test_old_unpacked_copies_go_and_the_running_ones_stay(self):
+        import ctypes
+        import os
+        import shutil
+        import sys
+        import time
+        temp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, temp, True)
+        old = time.time() - 3600
+
+        def folder(name, files=(), age=old):
+            path = temp / name
+            path.mkdir()
+            for file in files:
+                (path / file).mkdir() if "." not in file else (path / file).write_text("x")
+            os.utime(path, (age, age))
+            return path
+
+        marked = folder("_MEI1001", [crafter.UNPACK_MARK, "python315.dll"])
+        legacy = folder("_MEI1002", ["numpy", "PIL", "_tkinter.pyd", "base_library.zip", "python313.dll"])
+        foreign = folder("_MEI1003", ["python312.dll", "other.pyd"])  # another program's: no mark, not Sakuya's make-up
+        own = folder("_MEI1004", [crafter.UNPACK_MARK])
+        fresh = folder("_MEI1005", [crafter.UNPACK_MARK], age=time.time())  # a copy still starting
+        busy = folder("_MEI1006", [crafter.UNPACK_MARK])
+        shutil.copy(next(Path(sys.base_prefix).rglob("*.pyd")), busy / "python315.dll")
+        os.utime(busy, (old, old))
+        handle = ctypes.WinDLL(str(busy / "python315.dll"))  # a running copy has its library loaded
+        self.addCleanup(lambda: ctypes.windll.kernel32.FreeLibrary(ctypes.c_void_p(handle._handle)))
+        not_mei = folder("about_x", [crafter.UNPACK_MARK])
+        self.assertEqual(crafter.remove_old_unpacks(temp, own), 2)
+        self.assertFalse(marked.exists())
+        self.assertFalse(legacy.exists())
+        for kept in (foreign, own, fresh, busy, not_mei):
+            self.assertTrue(kept.exists(), kept.name)
+        self.assertTrue((busy / "python315.dll").exists())
+
+    def test_old_league_prices_and_broken_files_go_after_two_months(self):
+        import os
+        import shutil
+        import time
+        folder = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, folder, True)
+        (folder / "leagues").mkdir()
+        long_ago = time.time() - (crafter.OLD_FILE_DAYS + 1) * 86400
+        paths = {name: folder / name for name in ("prices.json.broken", "data.json.broken", "leagues/old_prices.json", "leagues/now_prices.json", "settings.json")}
+        for name, path in paths.items():
+            path.write_text("{}")
+            if name in ("prices.json.broken", "leagues/old_prices.json", "settings.json"):
+                os.utime(path, (long_ago, long_ago))
+        self.assertEqual(crafter.remove_old_files(folder), 2)
+        self.assertEqual(sorted(name for name, path in paths.items() if path.exists()), ["data.json.broken", "leagues/now_prices.json", "settings.json"])  # the player's own files are never touched
+
+
 if __name__ == "__main__":
     unittest.main()

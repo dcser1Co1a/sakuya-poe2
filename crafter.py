@@ -2,7 +2,14 @@
 
 Mods and weights come from poe2db, base items from RePoE, prices from poe.ninja.
 """
+import os
 import sys
+
+if getattr(sys, "frozen", False) and getattr(sys, "_MEIPASS", None):
+    try:  # marks this copy's unpacked files as Sakuya's: once the copy is gone, a later start clears them
+        open(os.path.join(sys._MEIPASS, "sakuya.unpacked"), "a").close()
+    except OSError:
+        pass
 
 if __name__ == "__main__" and "--watch-game" in sys.argv[1:]:  # the watcher that opens Sakuya with the game: before the heavy libraries, so it stays small
     import game_watch
@@ -21,12 +28,12 @@ import http.client
 import io
 import json
 import math
-import os
 import queue
 import random
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 import tkinter as tk
@@ -769,6 +776,54 @@ def remove_update_leftovers(exe: Path) -> bool:
         except OSError:
             clean = False
     return clean
+
+
+UNPACK_MARK = "sakuya.unpacked"  # put in the folder each running copy unpacks itself into
+UNPACK_SIGNS = ("numpy", "PIL", "_tkinter.pyd", "base_library.zip")  # what an older Sakuya's folder holds, from before the mark
+UNPACK_SETTLE_SECONDS = 600  # a folder touched lately may be a copy still starting up
+OLD_FILE_DAYS = 60  # a price file of a league not opened that long, or a broken file kept aside
+
+
+def is_sakuya_unpack(folder: Path) -> bool:
+    return (folder / UNPACK_MARK).exists() or all((folder / name).exists() for name in UNPACK_SIGNS)
+
+
+def remove_old_unpacks(temp: Path, own: Path | None, now: float | None = None) -> int:
+    """The program unpacks itself into a _MEI folder of TEMP at every start and removes it on a normal exit; a copy closed by force
+    (an update, a newer copy taking over, the task manager) leaves about 65 MB behind. Folders of copies still running are kept:
+    their Python library is loaded, and Windows refuses to delete a loaded library. Gives how many were removed."""
+    now = time.time() if now is None else now
+    removed = 0
+    try:
+        folders = [folder for folder in temp.iterdir() if folder.name.startswith("_MEI") and folder.is_dir()]
+    except OSError:
+        return 0
+    for folder in folders:
+        try:
+            if (own and folder.resolve() == own.resolve()) or now - folder.stat().st_mtime < UNPACK_SETTLE_SECONDS or not is_sakuya_unpack(folder):
+                continue
+            for library in folder.glob("python3*.dll"):
+                library.unlink()  # refused while a running copy has it loaded: then the folder is that copy's and stays
+        except OSError:
+            continue
+        shutil.rmtree(folder, ignore_errors=True)
+        removed += not folder.exists()
+    return removed
+
+
+def remove_old_files(folder: Path, now: float | None = None) -> int:
+    """Price files of leagues not opened for two months (they come again if the league is picked) and broken files kept aside as long."""
+    now = time.time() if now is None else now
+    removed = 0
+    for path in [*folder.glob("*.broken"), *(folder / "leagues").glob("*.json")]:
+        try:
+            if now - path.stat().st_mtime > OLD_FILE_DAYS * 86400:
+                path.unlink()
+                removed += 1
+        except OSError:
+            continue
+    return removed
+
 
 def build_bases(raw_bases: dict, pages: dict[str, dict]) -> dict[str, dict]:
     bases: dict[str, dict] = {}
@@ -4782,6 +4837,7 @@ class App:
                                                     lambda: self.events.put(("trade_stats", None))), daemon=True).start()
         threading.Thread(target=keep_running, args=(run_program_checks, status, lambda release: self.events.put(("new_version", release))), daemon=True).start()
         self._remove_update_leftovers()
+        threading.Thread(target=self._clear_leftovers, daemon=True).start()
         threading.Thread(target=keep_running, args=(run_local_build_watch, watch), daemon=True).start()
         threading.Thread(target=keep_running, args=(run_online_build_watch, watch), daemon=True).start()
         self.root.after(POLL_MS, self._poll)
@@ -5682,6 +5738,16 @@ class App:
         self.set_status(t("Не удалось обновить ({reason}). Открываю страницу новой версии, скачайте её вручную").format(reason=reason))
         if self.new_release:
             webbrowser.open(self.new_release.link)
+
+    @staticmethod
+    def _clear_leftovers() -> None:
+        """Unneeded files, on a thread of their own at the start: unpacked copies closed by force, old league prices, broken files kept aside."""
+        try:
+            if getattr(sys, "frozen", False) and getattr(sys, "_MEIPASS", None):
+                remove_old_unpacks(Path(tempfile.gettempdir()), Path(sys._MEIPASS))
+            remove_old_files(APP_DIR)
+        except Exception:  # tidying must never stop the program
+            log_error("clearing old files")
 
     def _remove_update_leftovers(self, tries: int = LEFTOVER_TRIES) -> None:
         """After an update the old exe is still next to the new one, and its copy may be closing for a moment."""

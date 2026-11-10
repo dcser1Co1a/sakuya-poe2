@@ -96,6 +96,7 @@ Some things cannot update by themselves. A new crafting mechanic, or a new omen'
 | Registers its hotkeys with Windows (`RegisterHotKey`) | While it runs | `Ctrl+E`, `Ctrl+D`, `Ctrl+R`. It is not a keyboard hook: other keys never reach it |
 | Reads the clipboard | Right after its own `Ctrl+Alt+C`, or when you click Paste | Item text and build codes |
 | Replaces its own `Sakuya.exe` | Only when you click Update, after checking the file against the checksum GitHub publishes | Updates |
+| Removes its own leftovers: the `_MEI…` folders in TEMP it unpacks itself into (about 65 MB each, left when a copy is closed by force), and price files of leagues not opened for two months | At start, in the background. A folder of a copy still running is never touched | To keep the disk clean |
 
 It does not read browsers, passwords, cookies, Discord, Telegram or Steam accounts, or any files outside its folder, except three: the build number in Steam's record of the game, the game's filter folder when the Filter page is open (to list your filters and copy your usual one under Sakuya's lines), and a sound file you pick yourself. Everything it downloads comes from the sites listed above, and nothing about you is sent anywhere.
 
@@ -212,6 +213,7 @@ This product isn't affiliated with or endorsed by Grinding Gear Games in any way
 | Регистрирует свои горячие клавиши в Windows (`RegisterHotKey`) | Пока работает | `Ctrl+E`, `Ctrl+D`, `Ctrl+R`. Это не перехват клавиатуры: остальные клавиши до неё не доходят |
 | Читает буфер обмена | Сразу после своего `Ctrl+Alt+C` или когда вы нажимаете «Вставить» | Текст предмета и коды билдов |
 | Заменяет свой `Sakuya.exe` | Только по кнопке «Обновить», после сверки с контрольной суммой, которую публикует GitHub | Обновление |
+| Удаляет свои остатки: папки `_MEI…` во временной папке, куда она распаковывается (около 65 МБ каждая, остаются, если программу закрыли принудительно), и файлы цен лиг, которые не открывались два месяца | При запуске, в фоне. Папку работающей копии не трогает никогда | Чтобы не захламлять диск |
 
 Не читает браузеры, пароли, cookies, аккаунты Discord, Telegram и Steam и вообще файлы вне своей папки, кроме трёх: номера сборки в записи Steam об игре, папки фильтров игры, когда открыта страница «Фильтр» (чтобы показать ваши фильтры и скопировать обычный под строки Sakuya), и звукового файла, который вы выбрали сами. Всё скачивает с перечисленных выше сайтов, а о вас ничего никуда не отправляет.
 
