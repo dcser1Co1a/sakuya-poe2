@@ -134,7 +134,8 @@ def clean_build_history(stored) -> list[dict]:
         level = entry.get("level")
         kept.append({"code": entry["code"], **{key: entry[key][:60] if isinstance(entry.get(key), str) else "" for key in ("name", "class_name", "ascendancy")},
                      "level": level if isinstance(level, int) and not isinstance(level, bool) and 1 <= level <= 100 else None,
-                     "saved_at": entry["saved_at"] if is_time(entry.get("saved_at")) else ""})
+                     "saved_at": entry["saved_at"] if is_time(entry.get("saved_at")) else "",
+                     **({"refreshed_at": entry["refreshed_at"]} if is_time(entry.get("refreshed_at")) else {})})
     return kept
 
 

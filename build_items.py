@@ -18,6 +18,7 @@ import xml.etree.ElementTree as ElementTree
 from tkinter import ttk
 import zlib
 from dataclasses import dataclass
+from datetime import datetime
 
 from sakura import BODY, MOD_OFF, MOD_ON, MOD_ON_GROUND, trace_while
 
@@ -48,6 +49,10 @@ jewel_by_range = [True]  # search from the least of each mod's range, or from th
 LEVEL_TYPING_MS = 350  # The pause after the last key of «my level» before the item updates
 NICK_TYPING_MS = 400  # the pause after the last key of a character's name before it is saved
 NICK_LENGTH = 40
+# poe.ninja's export link, a Path of Building address of theirs that is not to be used: only the account and the name are taken from it,
+# to open the character's own page in the player's browser.
+NINJA_EXPORT = re.compile(r"^https://poe\.ninja/poe2/pob/raw/profile/code/([^/?#]+)/[^/?#]+/([^/?#]+)/?$")
+REFRESH_SECONDS = 3600  # the character's page opens once an hour at most: poe.ninja does not see a character change much faster
 IMPORT_CHARACTER = re.compile(r"/profile/.*/([^/?#]+)/?$")  # poe.ninja's export link ends with the character's name; the account before it is not kept
 GRID_WIDTH, GRID_HEIGHT = 10, 9.3
 JEWEL = "Jewel "  # the start of a jewel's slot name; the rest is its socket on the passive tree
@@ -88,6 +93,7 @@ class Build:
     slots: dict
     jewels: tuple = ()  # (socket, item) for each jewel on the passive tree, in the tree's order
     character: str = ""  # the character's name, when the code was exported from a character
+    page: str = ""  # the character's page on poe.ninja, when the code was exported there
 
 
 @dataclass(frozen=True)
@@ -224,7 +230,29 @@ def read_build(xml_text: str) -> Build:
     named = IMPORT_CHARACTER.search(link)
     character = urllib.parse.unquote(named.group(1)) if named else ""
     return Build(level, attributes.get("className", ""), attributes.get("ascendClassName", "") if attributes.get("ascendClassName") != "None" else "", slots,
-                 _tree_jewels(root, raw_items if items_node is not None else {}), character[:40])
+                 _tree_jewels(root, raw_items if items_node is not None else {}), character[:40], character_page(link))
+
+
+def character_page(link: str) -> str:
+    """The character's page on poe.ninja, the one a player opens in the browser, from the export link in the code; empty for a code made elsewhere."""
+    found = NINJA_EXPORT.match(link.strip())
+    if not found:
+        return ""
+    account, name = (urllib.parse.quote(urllib.parse.unquote(part), safe="") for part in found.groups())
+    return f"https://poe.ninja/poe2/profile/{account}/character/{name}"
+
+
+def refresh_wait(entry: dict, now: str) -> int:
+    """Seconds until the character's page may open again; 0 when it may now."""
+    try:
+        spent = (datetime.fromisoformat(now) - datetime.fromisoformat(entry.get("refreshed_at") or "")).total_seconds()
+    except ValueError:
+        return 0
+    return max(int(REFRESH_SECONDS - spent), 0) if spent >= 0 else 0
+
+
+def marked_refreshed(history: list[dict], code: str, now: str) -> list[dict]:
+    return [{**entry, "refreshed_at": now} if entry.get("code") == code else entry for entry in history]
 
 
 def history_label(entry: dict, translate) -> str:
@@ -235,11 +263,18 @@ def history_label(entry: dict, translate) -> str:
 
 def add_to_history(history: list[dict], code: str, build: Build, now: str) -> list[dict]:
     """The build at the top of the history. The same code again moves up rather than taking a second place, and keeps a name the player gave it
-    when the code carries none."""
+    when the code carries none. A newer code of the same character takes the place of the older one: that is how a build is brought up to date."""
     plain = "".join(code.split())
-    earlier = next((old for old in history if old.get("code") == plain), {})
+    character = build.character.casefold()
+
+    def same(old: dict) -> bool:
+        return old.get("code") == plain or bool(character) and old.get("name", "").casefold() == character
+
+    earlier = next((old for old in history if same(old)), {})
     entry = {"code": plain, "name": build.character or earlier.get("name", ""), "class_name": build.class_name, "ascendancy": build.ascendancy, "level": build.level, "saved_at": now}
-    return [entry, *(old for old in history if old.get("code") != plain)][:HISTORY_SIZE]
+    if earlier.get("refreshed_at"):
+        entry["refreshed_at"] = earlier["refreshed_at"]  # the hour's wait goes on with the newer code
+    return [entry, *(old for old in history if not same(old))][:HISTORY_SIZE]
 
 
 def renamed(history: list[dict], code: str, name: str) -> list[dict]:
@@ -422,6 +457,8 @@ class BuildPage:
         self.selected: str | None = None
         self.hovered: str | None = None
         self.places: dict[str, tuple] = dict(SLOT_PLACES)
+        self.refresh_button, self.refresh_job, self.current_code = None, None, ""
+        self.pages_of_codes: dict[str, str] = {}
         page = tk.Frame(parent, bg=colors["background"], padx=10)
         page.pack(fill="both", expand=True)
         top = tk.Frame(page, bg=colors["background"])
@@ -452,6 +489,9 @@ class BuildPage:
             self.history_box.pack(side="left", ipady=2)
             self.history_box.bind("<<ComboboxSelected>>", lambda _: self.open_from_history())
             helpers["button"](remembered, self.t("Убрать из истории"), self.forget_from_history).pack(side="left", padx=(6, 0))
+            # A newer code of the same character: its page on poe.ninja opens in the browser, the player copies the code there, and the entry updates.
+            self.refresh_button = helpers["button"](remembered, self.t("Обновить с poe.ninja"), self.refresh_from_ninja)
+            self.refresh_button.pack(side="left", padx=(6, 0))
             # The character's name: filled in from the code when it carries one, and typed in by the player when it does not.
             naming = tk.Frame(page, bg=colors["background"])  # a line of its own: beside the history it fell off a narrow window
             naming.pack(fill="x", pady=(0, 6))
@@ -463,7 +503,10 @@ class BuildPage:
             trace_while(self.nick, nick_entry, lambda *_: self._nick_typed())
             self.nick_hint = tk.Label(naming, text="", bg=colors["background"], fg=colors["accent"], font=(BODY, 9))
             self.nick_hint.pack(side="left", padx=(8, 0))
+            self.refresh_hint = tk.Label(page, text="", bg=colors["background"], fg=colors["accent"], font=(BODY, 9), anchor="w", justify="left", wraplength=880)
+            self.refresh_line_after = naming
             self._fill_history()
+            self._paint_refresh()
         self.title = tk.Label(page, text="", bg=colors["background"], fg=colors["text"], font=(BODY, 12, "bold"), anchor="w")
         self.title.pack(fill="x")
         body = tk.Frame(page, bg=colors["background"])
@@ -555,6 +598,61 @@ class BuildPage:
         if 0 <= chosen < len(self.history):
             self.helpers["save_history"]([entry for number, entry in enumerate(self.history) if number != chosen])
             self._fill_history()
+            self._paint_refresh()
+
+    # ---- bringing a build up to date
+    def _current_entry(self) -> dict | None:
+        return next((entry for entry in getattr(self, "history", []) if entry.get("code") == self.current_code), None) if self.current_code else None
+
+    def _page_of_code(self, code: str) -> str:
+        if code not in self.pages_of_codes:
+            try:
+                self.pages_of_codes[code] = read_build(decode_build_code(code)).page
+            except BuildCodeError:
+                self.pages_of_codes[code] = ""
+        return self.pages_of_codes[code]
+
+    def _paint_refresh(self) -> None:
+        """The button says when it works: now, in so many minutes, or not for a code without a link to the character."""
+        if not self.refresh_button or not self.refresh_button.winfo_exists():
+            return
+        if self.refresh_job:
+            self.refresh_button.winfo_toplevel().after_cancel(self.refresh_job)
+            self.refresh_job = None
+        entry = self._current_entry()
+        wait = refresh_wait(entry, self.helpers["now"]()) if entry and self._page_of_code(entry["code"]) else 0
+        ready = bool(entry) and bool(self._page_of_code(entry["code"])) and not wait
+        text = self.t("Обновить через {minutes} мин").format(minutes=max(1, -(-wait // 60))) if wait else self.t("Обновить с poe.ninja")
+        self.refresh_button.config(text=text, fg=self.colors["text"] if ready else self.colors["muted"])
+        if wait:
+            self.refresh_job = self.refresh_button.winfo_toplevel().after(min(wait, 60) * 1000, self._paint_refresh)  # on the window: the page may be built anew
+
+    def _say_refresh(self, text: str) -> None:
+        self.refresh_hint.config(text=text)
+        if text:
+            self.refresh_hint.pack(fill="x", pady=(0, 6), after=self.refresh_line_after)
+        else:
+            self.refresh_hint.pack_forget()
+
+    def refresh_from_ninja(self) -> None:
+        entry = self._current_entry()
+        if not entry:
+            return self._say_refresh(self.t("Сначала откройте билд из истории."))
+        page = self._page_of_code(entry["code"])
+        if not page:
+            return self._say_refresh(self.t("В этом коде нет ссылки на персонажа: так бывает у кода из Path of Building или гайда. Возьмите код кнопкой экспорта у персонажа на poe.ninja, и кнопка заработает."))
+        now = self.helpers["now"]()
+        wait = refresh_wait(entry, now)
+        if wait:
+            return self._say_refresh(self.t("Страницу персонажа можно открывать раз в час: осталось {minutes} мин.").format(minutes=max(1, -(-wait // 60))))
+        self.helpers["open_link"](page)
+        self.helpers["save_history"](marked_refreshed(self.helpers["history"](), entry["code"], now))
+        self._fill_history()
+        shown = next((number for number, kept in enumerate(self.history) if kept.get("code") == self.current_code), None)
+        if shown is not None:
+            self.history_box.current(shown)
+        self._say_refresh(self.t("Открыта страница персонажа на poe.ninja. Скопируйте там код для Path of Building и нажмите «Вставить и открыть»: запись в истории обновится."))
+        self._paint_refresh()
 
     def open_code(self) -> None:
         found = self.helpers["copied_item"](self.code.get()) if self.helpers.get("copied_item") else None  # An item copied in the game
@@ -574,6 +672,8 @@ class BuildPage:
                 self.current_code = self.history[0]["code"]
                 self._show_nick(self.history[0].get("name", ""))
                 self.title.config(text=history_label(self.history[0], self.t))
+                self._say_refresh("")
+                self._paint_refresh()
         except BuildCodeError as error:
             self.build, self.views, self.selected = None, {}, None
             self.title.config(text=self.t(str(error)), fg=self.colors["down"])

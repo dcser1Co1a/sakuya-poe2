@@ -146,6 +146,33 @@ class CodeTests(unittest.TestCase):
         self.assertEqual(build.character, "RaorasFootArc")
         self.assertEqual(read_build(decode_build_code(code_of(build_xml({"1": RING}, {"Ring 1": "1"})))).character, "")  # a code made in Path of Building itself
 
+    def test_a_newer_code_of_the_same_character_updates_its_entry_and_its_page_opens_once_an_hour(self):
+        def exported(name, level, account="Some-1234"):
+            link = f'<Import exportParty="false" importLink="https://poe.ninja/poe2/pob/raw/profile/code/{account}/forbiddenrites/{name}"/>'
+            xml = build_xml({"1": RING}, {"Ring 1": "1"}).replace('level="94"', f'level="{level}"').replace("</PathOfBuilding2>", link + "</PathOfBuilding2>")
+            return code_of(xml)
+        old_code, new_code = exported("RaorasFootArc", 90), exported("RaorasFootArc", 94)
+        build = read_build(decode_build_code(old_code))
+        self.assertEqual(build.page, "https://poe.ninja/poe2/profile/Some-1234/character/RaorasFootArc")  # the character's own page, never their Path of Building address
+        self.assertNotIn("/pob/", build.page)
+        self.assertEqual(build_items.character_page("https://evil.example/poe2/pob/raw/profile/code/a/b/c"), "")
+        self.assertEqual(build_items.character_page("https://poe.ninja/poe2/pob/raw/profile/code/A%20B/league/C%2FD"), "https://poe.ninja/poe2/profile/A%20B/character/C%2FD")
+        self.assertEqual(read_build(decode_build_code(code_of(build_xml({"1": RING}, {"Ring 1": "1"})))).page, "")  # a code from Path of Building itself
+        other = read_build(decode_build_code(exported("SomeoneElse", 50)))
+        history = build_items.add_to_history([], old_code, build, "2026-11-10T20:00:00")
+        history = build_items.add_to_history(history, exported("SomeoneElse", 50), other, "2026-11-10T20:01:00")
+        history = build_items.marked_refreshed(history, "".join(old_code.split()), "2026-11-10T20:02:00")
+        history = build_items.add_to_history(history, new_code, read_build(decode_build_code(new_code)), "2026-11-10T20:30:00")
+        self.assertEqual([(entry["name"], entry["level"]) for entry in history], [("RaorasFootArc", 94), ("SomeoneElse", 50)])  # one entry each, the newer code in its place
+        self.assertEqual(history[0]["refreshed_at"], "2026-11-10T20:02:00")  # the hour goes on with the newer code
+        self.assertEqual(build_items.refresh_wait(history[0], "2026-11-10T20:32:00"), 1800)
+        self.assertEqual(build_items.refresh_wait(history[0], "2026-11-10T21:02:00"), 0)
+        self.assertEqual(build_items.refresh_wait(history[1], "2026-11-10T20:32:00"), 0)  # never opened
+        self.assertEqual(build_items.refresh_wait({"refreshed_at": "2026-11-11T09:00:00"}, "2026-11-10T20:32:00"), 0)  # a clock put back does not lock the button
+        import shapes
+        self.assertEqual(shapes.clean_build_history(history)[0]["refreshed_at"], "2026-11-10T20:02:00")
+        self.assertNotIn("refreshed_at", shapes.clean_build_history([{**history[0], "refreshed_at": "soon"}])[0])
+
     def test_the_history_keeps_the_newest_first_once_each(self):
         build = read_build(decode_build_code(code_of(build_xml({"1": RING}, {"Ring 1": "1"}))))
         history = build_items.add_to_history([], "code one", build, "2026-11-08T18:00:00")

@@ -498,8 +498,8 @@ class Board:
         for number in range(first, min(last, len(self.lines))):
             if number not in self.drawn:
                 self._draw_line(number)
-        if len(self.drawn) < len(self.lines) and not self.fill_job:
-            self.fill_job = canvas.after(self.FILL_PAUSE_MS, self._fill_rest)
+        if len(self.drawn) < len(self.lines) and not self.fill_job:  # timed on the window: the page and its canvas may be built anew meanwhile
+            self.fill_job = canvas.winfo_toplevel().after(self.FILL_PAUSE_MS, self._fill_rest)
 
     def _fill_rest(self) -> None:
         """The lines out of view, a few at a time while the window is idle: by the time the player scrolls there they are drawn."""
@@ -510,7 +510,7 @@ class Board:
         for number in left:
             self._draw_line(number)
         if len(self.drawn) < len(self.lines):
-            self.fill_job = self.canvas.after(self.FILL_PAUSE_MS, self._fill_rest)
+            self.fill_job = self.canvas.winfo_toplevel().after(self.FILL_PAUSE_MS, self._fill_rest)
 
     def _command_under_pointer(self):
         return next((self.commands[tag] for tag in self.canvas.gettags("current") if tag in self.commands), None)
@@ -535,7 +535,7 @@ class Board:
         self.commands = {}
         self.drawn = set()
         if self.fill_job:
-            canvas.after_cancel(self.fill_job)
+            canvas.winfo_toplevel().after_cancel(self.fill_job)
             self.fill_job = None
         self.tops, self.heights = [], []
         y = 0
