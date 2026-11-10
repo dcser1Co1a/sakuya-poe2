@@ -7347,7 +7347,9 @@ class App:
                 glide["job"] = None
                 return
             canvas.yview_moveto(first + gap * 0.3)
-            glide["job"] = self.root.after(12, step)
+            # The next step only after this one is drawn: Tk redraws widgets when no timer is due, and a timer waiting all along
+            # left the buttons and fields of a scrolled page undrawn, smeared over each other, until the glide stopped.
+            glide["job"] = self.root.after_idle(lambda: glide.__setitem__("job", self.root.after(12, step)) if canvas.winfo_exists() else glide.__setitem__("job", None))
 
         def on_wheel(event):
             if not canvas.winfo_exists():
@@ -7358,6 +7360,11 @@ class App:
             total = float(str(canvas.cget("scrollregion") or "0 0 0 1").split()[3]) or 1
             start = glide["target"] if glide["job"] else first
             glide["target"] = min(max(start - event.delta / 120 * SCROLL_PIXELS / total, 0.0), 1.0 - (last - first))
+            items = canvas.find_all()
+            if len(items) <= 4 and any(canvas.type(item) == "window" for item in items):
+                # Real buttons and fields in a frame: every glide step redraws all of them, so the page moves once per notch.
+                canvas.yview_moveto(glide["target"])
+                return
             if not glide["job"]:
                 step()
 
