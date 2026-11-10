@@ -4244,6 +4244,7 @@ POLL_MS = 16  # how soon a hotkey's result reaches the window
 SCROLL_PIXELS = 110
 SCROLL_KEY_PIXELS = 65
 SEARCH_DELAY_MS = 120
+RDW_INVALIDATE, RDW_ERASE, RDW_ALLCHILDREN, RDW_UPDATENOW = 0x1, 0x4, 0x80, 0x100  # RedrawWindow: a scrolled page drawn anew, all of it
 PRICE_CARD_WIDTH, PRICE_CARD_HEIGHT, PRICE_CARD_GAP = 250, 104, 6
 PRICE_GRAPH_TOP, PRICE_GRAPH_HEIGHT = 68, 30
 PRICE_DRAW_TURN_SECONDS = 0.012  # short enough that the window keeps answering between turns
@@ -7327,7 +7328,17 @@ class App:
         """A thin scrollbar that appears on overflow, and a wheel that glides instead of jumping."""
         scrollbar = SlimScrollbar(holder, canvas.yview, BG, ACCENT)
         canvas.bind("<Button-1>", lambda _: canvas.focus_set(), add="+")  # leaves a text field, so the arrow keys scroll
-        glide = {"target": 0.0, "job": None}
+        glide = {"target": 0.0, "job": None, "repaint": None, "seen": None}
+
+        def repaint():
+            # Windows moves a scrolled frame by copying its old picture, and the buttons and fields in it were not told to draw again:
+            # smears and dark bars over the steps of the filter page. The whole canvas and everything in it is marked to be drawn anew.
+            glide["repaint"] = None
+            if canvas.winfo_exists():
+                try:
+                    ctypes.windll.user32.RedrawWindow(ctypes.wintypes.HWND(canvas.winfo_id()), None, None, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW)
+                except (AttributeError, OSError, ValueError):
+                    pass
 
         def on_view_change(first, last):
             scrollbar.set(first, last)
@@ -7335,6 +7346,10 @@ class App:
                 scrollbar.grid_remove()
             else:
                 scrollbar.grid(row=0, column=1, sticky="nse")
+            items = canvas.find_all()
+            if (first, last) != glide["seen"] and len(items) <= 4 and any(canvas.type(item) == "window" for item in items) and not glide["repaint"]:
+                glide["repaint"] = canvas.after_idle(repaint)
+            glide["seen"] = (first, last)
 
         def step():
             if not canvas.winfo_exists():
