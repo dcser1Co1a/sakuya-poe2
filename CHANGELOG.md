@@ -1,5 +1,25 @@
 # Changelog / Список изменений
 
+## 1.4.4
+
+**English**
+
+- **Where it drops: search by letters.** The list narrows from the first letter, as the craft's base search does: names that begin with what you typed first, then a word that does, then anywhere inside; Russian and English names, bases and where it drops. What the chosen section does not hold is shown below under «In other sections».
+- **Where it drops is smoother.** The list draws what is in view at once and the rest in the background: the whole list opens in about a tenth of a second instead of one, and a letter typed costs as little. The tab is drawn again only when new data came.
+- **Build history: update a character.** A newer code of the same character takes the place of the older entry instead of adding a second one. «Update from poe.ninja» opens the character's own page in your browser, at most once an hour, for a code exported there; copy the code on that page and press Paste and open.
+- **Craft: «Remove all»** in the orbs-to-skip box turns everything off at once; pressed again, it brings back what was off before.
+- **Tidier disk.** At start Sakuya removes its own leftovers: the unpacked copies in TEMP left when it was closed by force (about 65 MB each), and price files of leagues not opened for two months. A copy still running is never touched.
+- **Filter page:** the steps are laid out in one column again, and pages of buttons and fields move once per wheel notch.
+
+**Русский**
+
+- **«Где падает»: поиск по буквам.** Список сужается с первой буквы, как поиск базы в крафте: сначала названия, которые начинаются с набранного, потом те, где так начинается слово, потом совпадения внутри; русские и английские имена, базы и откуда падает. То, чего нет в выбранном разделе, показано ниже под «В других разделах».
+- **«Где падает» плавнее.** Список сразу рисует видимое, остальное в фоне: весь список открывается примерно за десятую долю секунды вместо секунды, и поиск по букве так же быстр. Вкладка перерисовывается только когда пришли новые данные.
+- **История билдов: обновить персонажа.** Новый код того же персонажа заменяет старую запись, а не добавляет вторую. «Обновить с poe.ninja» открывает в браузере страницу персонажа, не чаще раза в час, для кода, взятого там; скопируйте код на странице и нажмите «Вставить и открыть».
+- **Крафт: «Убрать всё»** в окне «Без каких сфер» отключает всё разом, повторное нажатие возвращает как было.
+- **Чище диск.** При запуске Sakuya убирает свои остатки: распакованные копии во временной папке, оставшиеся после принудительного закрытия (около 65 МБ каждая), и файлы цен лиг, которые не открывались два месяца. Работающую копию не трогает никогда.
+- **Страница «Фильтр»:** шаги снова одной колонкой, а страницы с кнопками и полями сдвигаются колесом на один щелчок сразу.
+
 ## 1.4.3
 
 **English**
