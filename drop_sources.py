@@ -291,6 +291,49 @@ def shown_drops(drops: list[Drop], kind: str, query: str, show_name, matches, sh
     return sorted(chosen, key=lambda drop: (KINDS.index(drop.kind) if drop.kind in KINDS else len(KINDS), show_name(drop.name).casefold()))
 
 
+def _plain(text: str) -> str:
+    return text.casefold().replace("ё", "е")
+
+
+def search_place(query: str, names: list[str], text: str, matches) -> int | None:
+    """How well the typed letters fit an item, ranked as the craft's base search ranks bases: a name that begins with them,
+    then a name with a word that does, then one holding them anywhere; last, the words found anywhere, its source too. None when they do not fit."""
+    typed = _plain(query.strip())
+    if not typed:
+        return 0
+    names = [_plain(name) for name in names if name]
+    if any(name.startswith(typed) for name in names):
+        return 0
+    if any(word.startswith(typed) for name in names for word in re.split(r"[\s\-'’,()]+", name)):
+        return 1
+    if any(typed in name for name in names):
+        return 2
+    words = [word for word in re.split(r"[^\w%+]+", typed) if len(word) > 1]  # one letter alone would match nearly everything here
+    plain = _plain(text)
+    if words and all(word in plain for word in words):
+        return 3
+    return None
+
+
+def searched_drops(drops: list[Drop], kind: str, query: str, show_name, matches, show_base=lambda base: base) -> tuple[list[Drop], list[Drop]]:
+    """What a search finds: in the chosen kind best fit first, and apart, what it finds in the other kinds."""
+    inside, outside = [], []
+    for drop in drops:
+        names = [show_name(drop.name), drop.name, show_base(drop.base or drop.name), drop.base]
+        place = search_place(query, names, f"{' '.join(name for name in names if name)} {drop.source} {russian_source(drop)}", matches)
+        if place is None:
+            continue
+        rank = (place, _plain(names[0] if drop.base else names[2]))  # by the shown name within each fit, as the craft lists bases; a jewel base shows as a base
+        (inside if in_kind(drop, kind) else outside).append((rank, drop))
+    return [drop for _, drop in sorted(inside, key=lambda pair: pair[0])], [drop for _, drop in sorted(outside, key=lambda pair: pair[0])]
+
+
+def in_kind(drop: Drop, kind: str) -> bool:
+    if kind == "special":
+        return drop.kind not in ("world", "legacy")
+    return kind == "all" or drop.kind == kind
+
+
 def wiki_page(name: str) -> str:
     return f"{WIKI}/wiki/{urllib.parse.quote(name.replace(' ', '_'))}"
 
@@ -323,15 +366,34 @@ class DropPage:
         self.search = tk.StringVar()
         trace_while(self.search, bar, lambda *_: helpers["after_typing"](self.render))
         helpers["make_entry"](bar, self.search).pack(side="left", fill="x", expand=True, ipady=5)
-        self.board = Board(page, colors, helpers["enable_scrolling"])
+        self.board = Board(page, colors, helpers["enable_scrolling"], lazy=True)
         self.canvas = self.board.canvas
         self.images: list = []
+        self.base_names: dict[str, str] = {}
+        self.stale = True
+
+    def data_changed(self) -> None:
+        """Names, art or drop sources came: looked up again, and drawn again on the next visit."""
+        self.base_names = {}
+        self.stale = True
+
+    def show(self) -> None:
+        """Opening the tab: the list as it was left, drawn again only when something came meanwhile."""
+        if self.stale:
+            self.render()
+
+    def _show_base(self, base: str) -> str:
+        """A base in the player's language, looked up once: finding it among all names is slow, and a render asks for hundreds."""
+        if base not in self.base_names:
+            self.base_names[base] = self.helpers["show_base"](base)
+        return self.base_names[base]
 
     def set_kind(self, kind: str) -> None:
         self.kind = kind
         self.render()
 
     def render(self) -> None:
+        self.stale = False
         colors, helpers = self.colors, self.helpers
         for key, button in self.filter_buttons.items():
             chosen = key == self.kind
@@ -346,9 +408,19 @@ class DropPage:
         if drops:
             lines.append(Line([Cell(44, self.t("Предмет"), colors["muted"], 8, True), Cell(260, self.t("База"), colors["muted"], 8, True),
                                Cell(440, self.t("С кого падает"), colors["muted"], 8, True), Cell(-14, self.t("Шанс"), colors["muted"], 8, True, "e")], None, 24))
+        query = self.search.get().strip()
+        show_base = self._show_base
+        if query:  # best fit first, as in the craft's base search; what the other kinds hold comes after
+            found, elsewhere = searched_drops(drops, self.kind, query, helpers["show_unique"], helpers["matches"], show_base)
+            shown = [*found, *([None] if elsewhere else []), *elsewhere]
+        else:
+            shown = shown_drops(drops, self.kind, "", helpers["show_unique"], helpers["matches"], show_base)
         current = None
-        for drop in shown_drops(drops, self.kind, self.search.get().strip(), helpers["show_unique"], helpers["matches"], helpers["show_base"]):
-            if drop.kind != current and self.kind in ("all", "special"):
+        for drop in shown:
+            if drop is None:
+                lines.append(Line([Cell(10, self.t("В других разделах").upper(), colors["muted"], 8, True)], None, 30))
+                continue
+            if not query and drop.kind != current and self.kind in ("all", "special"):
                 current = drop.kind
                 lines.append(Line([Cell(10, self.t(KIND_TITLES.get(drop.kind, drop.kind)).upper(), colors["muted"], 8, True)], None, 26))
             icon = helpers["icon"](drop.name, drop.base, drop.jewel)
@@ -356,11 +428,11 @@ class DropPage:
                 self.images.append(icon)
             cells = [Cell(10, image=icon)] if icon else []
             is_base = not drop.base  # a jewel base is an item of its own, with no base under it
-            shown_name = helpers["show_base"](drop.name) if is_base else helpers["show_unique"](drop.name)
+            shown_name = show_base(drop.name) if is_base else helpers["show_unique"](drop.name)
             where = russian_source(drop) if russian else drop.source or ("Drops anywhere" if drop.kind == "world" else "")
             chance, note = chance_lines(drop, russian, helpers["listings"](drop.name))
             cells += [Cell(44, shown_name, colors["text"] if is_base else colors["unique"], 10, True),
-                      Cell(260, self.t("База самоцвета") if is_base else helpers["show_base"](drop.base), colors["muted"], 9),
+                      Cell(260, self.t("База самоцвета") if is_base else show_base(drop.base), colors["muted"], 9),
                       Cell(440, where, colors["soft"] if drop.kind in ("world", "legacy") else colors["text"], 9, False, "w", True, room=CHANCE_COLUMN)]
             if note:  # how many runs it takes in bold, the rate and the version small under it
                 cells += [Cell(-14, chance, colors["accent"], 10, True, "e", dy=-7), Cell(-14, note, colors["muted"], 8, False, "e", dy=8)]

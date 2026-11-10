@@ -4,6 +4,7 @@ Only two things go online: the exchange check, on a button press, and the Waysto
 """
 import html
 import json
+import bisect
 import math
 import re
 import time
@@ -411,10 +412,21 @@ class Line:
 
 
 class Board:
-    """Draws every list on one canvas. Hundreds of widgets would take far too long to lay out."""
+    """Draws every list on one canvas. Hundreds of widgets would take far too long to lay out.
+    A lazy board draws only the lines in view and a screen around them, the rest as they scroll near: a long list then costs what a short one does."""
 
-    def __init__(self, parent, colors: dict[str, str], enable_scrolling):
+    LAZY_MARGIN = 1.0  # screens drawn ahead above and below the view
+    FILL_BATCH, FILL_PAUSE_MS = 12, 30  # then the rest in the background: a few lines, a pause for the window to answer
+    fill_job = None
+
+    def __init__(self, parent, colors: dict[str, str], enable_scrolling, lazy: bool = False):
         self.colors = colors
+        self.lazy = lazy
+        self.tops: list[int] = []
+        self.heights: list[int] = []
+        self.drawn: set[int] = set()
+        self.drawn_rows: dict[tuple, int] = {}  # wrapped text measured once: (text, size, bold, room) -> rows
+        self.view_command = ""
         holder = tk.Frame(parent, bg=colors["background"])
         holder.pack(fill="both", expand=True)
         holder.columnconfigure(0, weight=1)
@@ -423,6 +435,9 @@ class Board:
         self.canvas = tk.Canvas(holder, bg=colors["background"], highlightthickness=0, bd=0)
         self.canvas.grid(row=0, column=0, sticky="nsew")
         enable_scrolling(holder, self.canvas)
+        if lazy:  # the scrollbar still hears of every move, and the board draws what came into view
+            self.view_command = str(self.canvas.cget("yscrollcommand"))
+            self.canvas.configure(yscrollcommand=self._on_view)
         self.lines: list[Line] = []
         self.drawn_width = None
         self.job = None
@@ -457,9 +472,45 @@ class Board:
         for cell in line.cells:
             if cell.wrap:
                 room = max(width - cell.x - 12 - cell.room, 40)
-                rows = sum(max(math.ceil(self._font(cell).measure(part) * 1.06 / room), 1) for part in cell.text.split("\n"))
+                key = cell.text, cell.size, cell.bold, room
+                rows = self.drawn_rows.get(key)
+                if rows is None:
+                    if len(self.drawn_rows) > 20000:
+                        self.drawn_rows.clear()
+                    rows = self.drawn_rows[key] = sum(max(math.ceil(self._font(cell).measure(part) * 1.06 / room), 1) for part in cell.text.split("\n"))
                 height = max(height, rows * WRAPPED_LINE_HEIGHT + 8)
         return height
+
+    def _on_view(self, first, last) -> None:
+        if self.view_command:
+            self.canvas.tk.call(self.view_command, first, last)
+        self._draw_in_view()
+
+    def _draw_in_view(self) -> None:
+        canvas = self.canvas
+        if not self.tops or not canvas.winfo_exists():
+            return
+        seen = max(canvas.winfo_height(), 200)
+        top = canvas.canvasy(0) - seen * self.LAZY_MARGIN
+        bottom = canvas.canvasy(0) + seen * (1 + self.LAZY_MARGIN)
+        first = max(bisect.bisect_right(self.tops, top) - 1, 0)
+        last = bisect.bisect_right(self.tops, bottom)
+        for number in range(first, min(last, len(self.lines))):
+            if number not in self.drawn:
+                self._draw_line(number)
+        if len(self.drawn) < len(self.lines) and not self.fill_job:
+            self.fill_job = canvas.after(self.FILL_PAUSE_MS, self._fill_rest)
+
+    def _fill_rest(self) -> None:
+        """The lines out of view, a few at a time while the window is idle: by the time the player scrolls there they are drawn."""
+        self.fill_job = None
+        if not self.canvas.winfo_exists():
+            return
+        left = [number for number in range(len(self.lines)) if number not in self.drawn][:self.FILL_BATCH]
+        for number in left:
+            self._draw_line(number)
+        if len(self.drawn) < len(self.lines):
+            self.fill_job = self.canvas.after(self.FILL_PAUSE_MS, self._fill_rest)
 
     def _command_under_pointer(self):
         return next((self.commands[tag] for tag in self.canvas.gettags("current") if tag in self.commands), None)
@@ -482,27 +533,44 @@ class Board:
         canvas.delete("all")
         canvas.config(cursor="")
         self.commands = {}
+        self.drawn = set()
+        if self.fill_job:
+            canvas.after_cancel(self.fill_job)
+            self.fill_job = None
+        self.tops, self.heights = [], []
         y = 0
-        for number, line in enumerate(self.lines):
+        for line in self.lines:
             height = self._height(line, width)
-            tag = f"line{number}"
-            ground = line.ground or (self.colors["background"] if line.command else None)
-            if ground:
-                canvas.create_rectangle(0, y, width, y + height, width=0, fill=ground, tags=(tag,))
-            for place, cell in enumerate(line.cells):
-                x = width + cell.x if cell.x < 0 else cell.x
-                tags = (f"{tag}cell{place}",) if cell.command else (tag,)
-                if cell.image:
-                    canvas.create_image(x, y + height // 2 + cell.dy, image=cell.image, anchor=cell.anchor, tags=tags)
-                else:
-                    wrap = {"width": max(width - cell.x - 12 - cell.room, 40)} if cell.wrap else {}
-                    canvas.create_text(x, y + height // 2 + cell.dy, text=cell.text, fill=cell.color or self.colors["text"], font=(BODY, cell.size, "bold" if cell.bold else "normal"), anchor=cell.anchor, tags=tags, **wrap)
-                if cell.command:
-                    self.commands[tags[0]] = cell.command
-            if line.command:
-                self.commands[tag] = line.command
+            self.tops.append(y)
+            self.heights.append(height)
             y += height + line.gap
         canvas.configure(scrollregion=(0, 0, width, max(y, 1)))
+        if self.lazy:
+            self._draw_in_view()
+        else:
+            for number in range(len(self.lines)):
+                self._draw_line(number)
+
+    def _draw_line(self, number: int) -> None:
+        canvas, line = self.canvas, self.lines[number]
+        width, y, height = self.drawn_width, self.tops[number], self.heights[number]
+        self.drawn.add(number)
+        tag = f"line{number}"
+        ground = line.ground or (self.colors["background"] if line.command else None)
+        if ground:
+            canvas.create_rectangle(0, y, width, y + height, width=0, fill=ground, tags=(tag,))
+        for place, cell in enumerate(line.cells):
+            x = width + cell.x if cell.x < 0 else cell.x
+            tags = (f"{tag}cell{place}",) if cell.command else (tag,)
+            if cell.image:
+                canvas.create_image(x, y + height // 2 + cell.dy, image=cell.image, anchor=cell.anchor, tags=tags)
+            else:
+                wrap = {"width": max(width - cell.x - 12 - cell.room, 40)} if cell.wrap else {}
+                canvas.create_text(x, y + height // 2 + cell.dy, text=cell.text, fill=cell.color or self.colors["text"], font=(BODY, cell.size, "bold" if cell.bold else "normal"), anchor=cell.anchor, tags=tags, **wrap)
+            if cell.command:
+                self.commands[tags[0]] = cell.command
+        if line.command:
+            self.commands[tag] = line.command
 
 
 # ----------------------------------------------------------------------------------- the tab

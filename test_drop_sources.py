@@ -77,6 +77,24 @@ class ReadingTests(unittest.TestCase):
         self.assertEqual([drop.name for drop in shown_drops(drops, "all", "голос", show, matches)], ["Voices"])
         self.assertEqual([drop.name for drop in shown_drops(drops, "world", "", show, matches)], ["Polcirkeln"])
 
+    def test_a_search_goes_by_letters_best_fit_first_as_the_craft_base_search(self):
+        drops = [Drop("Voices", "Sapphire", "simulacrum", "Drops in the Simulacrum.", None, False),
+                 Drop("Brutus' Lead Sprinkler", "Ring", "world", "Drops anywhere.", 30, False),
+                 Drop("Le Heup of All", "Iron Ring", "world", "Drops anywhere.", 40, False),
+                 Drop("Polcirkeln", "Sapphire", "boss", "Drops from Arbiter of Ash.", None, False)]
+        show = lambda name: {"Voices": "Голоса", "Polcirkeln": "Полярный круг"}.get(name, name)
+        search = lambda kind, query: tuple([drop.name for drop in part] for part in drop_sources.searched_drops(drops, kind, query, show, crafter.matches_search))
+        self.assertEqual(search("all", "г"), (["Voices", "Polcirkeln"], []))  # one letter: «Голоса» begins with it, «Полярный круг» only holds it
+        self.assertEqual(search("all", "п"), (["Polcirkeln"], []))
+        self.assertEqual(search("all", "ring")[0], ["Brutus' Lead Sprinkler", "Le Heup of All"])  # by the base's name too
+        self.assertEqual(search("all", "lead")[0], ["Brutus' Lead Sprinkler"])  # a word that begins with it
+        self.assertEqual(search("all", "rinkl")[0], ["Brutus' Lead Sprinkler"])  # anywhere inside
+        self.assertEqual(search("all", "arbiter")[0], ["Polcirkeln"])  # the source, last
+        found = search("all", "l")[0]
+        self.assertEqual(found[:2], ["Le Heup of All", "Brutus' Lead Sprinkler"])  # a name beginning with it before a word inside one
+        self.assertEqual(search("special", "le"), ([], ["Le Heup of All", "Brutus' Lead Sprinkler"]))  # found outside the chosen kind: shown apart
+        self.assertEqual(search("all", "ё"), ([], []))
+
     def test_a_line_for_the_build_page(self):
         stored = {"items": self.drops}
         self.assertEqual(drop_sources.drop_line(stored, "Voices", "ru"), "Падает в Симулякре")

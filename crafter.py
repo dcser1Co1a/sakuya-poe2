@@ -1849,6 +1849,7 @@ ENGLISH = {
     "Цены ещё загружаются": "Prices are still loading",
     "{league}  •  обновлено {time}  •  обновляется при просмотре, не чаще раза в час": "{league}  •  updated {time}  •  refreshed when viewed, at most once an hour",
     "Ничего не найдено": "Nothing found",
+    "В других разделах": "In other sections",
     "Цены этого раздела придут при следующем обновлении": "Prices for this section arrive with the next update",
     "Лига: {league}  |  ": "League: {league}  |  ",
     "Патч {version}  |  ": "Patch {version}  |  ",
@@ -5103,7 +5104,7 @@ class App:
                 self.build_stale = False
                 self.build_page.render()
         elif key == "drops":
-            self.drop_page.render()
+            self.drop_page.show()
         elif key == "filter":
             self.filter_page.show()
         elif key == "tools":
@@ -5112,6 +5113,8 @@ class App:
     def _build_page_data_changed(self) -> None:
         """Names, prices, art or drop sources came: the build page shows them the next time it is opened. An open page is not redrawn under the player, as before."""
         self.build_stale = True
+        if getattr(self, "drop_page", None):
+            self.drop_page.data_changed()
 
     def _take_away_other_pages(self) -> None:
         for key, page in self.pages.items():
@@ -6445,6 +6448,8 @@ class App:
                     self.build_page.render(details=False)
                 else:
                     self.build_stale = True
+                if getattr(self, "drop_page", None):
+                    self.drop_page.stale = True  # pictures for rows drawn without them; the open list is not redrawn under the player
             elif kind == "uniques":
                 uniques = clean_uniques(read_json(UNIQUES_PATH) or {})
                 self.unique_art, self.unique_russian, self.item_art = uniques.get("art", {}), uniques.get("russian", {}), uniques.get("items", {})
