@@ -2150,6 +2150,8 @@ ENGLISH = {
     "Санктум": "Sanctum",
     "Выйти из программы": "Quit the program",
     "Скрыть": "Hide",
+    "Убрать всё": "Remove all",
+    "Вернуть как было": "Bring back",
     "Лепестки": "Petals",
     "Оформление": "Appearance", "Программа перезапустится, открытый план крафта сбросится": "The program will restart, and an open crafting plan will be lost",
     "Не удалось перезапустить программу, оформление сменится при следующем запуске": "Could not restart the program; the look will change at the next start",
@@ -4555,6 +4557,9 @@ class App:
     ban_box = None
     bottom_bar = None
     ban_button = None
+    ban_all_button = None
+    ban_buttons: dict = {}
+    ban_before: set = set()
     mode_risk = None
     trade_memory_key = None
     petals = None
@@ -7136,9 +7141,15 @@ class App:
         self.ban_box = tk.Frame(self.body, bg=PANEL, highlightthickness=1, highlightbackground=BORDER, padx=8, pady=6)
         self.ban_box.pack(fill="x", pady=(0, 8), before=self.picker_columns)  # above the lists, which give up their height to it
         self._label(self.ban_box, t("Нажмите на то, чего у вас нет или что не хотите тратить: план обойдётся без этого."), MUTED, 9).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 4))
-        hide = self._button(self.ban_box, t("Скрыть"), self.toggle_ban_box)
+        corner = tk.Frame(self.ban_box, bg=PANEL)
+        corner.grid(row=0, column=3, sticky="e", padx=2, pady=(0, 4))
+        hide = self._button(corner, t("Скрыть"), self.toggle_ban_box)
         hide.config(font=(FONT, 9), padx=10, pady=2)
-        hide.grid(row=0, column=3, sticky="e", padx=2, pady=(0, 4))
+        hide.pack(side="right")
+        self.ban_all_button = self._button(corner, "", self._toggle_ban_all)
+        self.ban_all_button.config(font=(FONT, 9), padx=10, pady=2)
+        self.ban_all_button.pack(side="right", padx=(0, 6))
+        self.ban_buttons = {}
         for column in range(4):
             self.ban_box.columnconfigure(column, weight=1, uniform="ban")
         for number, name in enumerate(self._ban_choices()):
@@ -7146,7 +7157,9 @@ class App:
             button = tk.Button(self.ban_box, text=f" {show_currency(name).removeprefix('Предзнаменование ').removeprefix('Omen of ')}", image=self.currency_icon(name, 20) or "", compound="left", anchor="w", relief="flat", bd=0, cursor="hand2", padx=2, pady=0, font=(FONT, 8))
             button.config(command=lambda n=name, b=button: self._toggle_ban(n, b))
             button.grid(row=number // 4 + 1, column=number % 4, sticky="ew", padx=2, pady=1)
+            self.ban_buttons[name] = button
             self._paint_ban_choice(name, button)
+        self._paint_ban_all()
 
     def _paint_ban_choice(self, name: str, button: tk.Button) -> None:
         banned = name in self.banned
@@ -7157,6 +7170,25 @@ class App:
         self.save_settings(craft_banned=sorted(self.banned))
         self._paint_ban_choice(name, button)
         self._paint_ban_button()
+        self._paint_ban_all()
+
+    def _paint_ban_all(self) -> None:
+        everything = bool(self.ban_buttons) and all(name in self.banned for name in self.ban_buttons)
+        self.ban_all_button.config(text=t("Вернуть как было") if everything else t("Убрать всё"))
+
+    def _toggle_ban_all(self) -> None:
+        """Everything in the box off at once; pressed again, back to what was off before."""
+        shown = set(self.ban_buttons)
+        if shown <= self.banned:
+            self.banned = (self.banned - shown) | (self.ban_before & shown)
+        else:
+            self.ban_before = self.banned & shown
+            self.banned |= shown
+        self.save_settings(craft_banned=sorted(self.banned))
+        for name, button in self.ban_buttons.items():
+            self._paint_ban_choice(name, button)
+        self._paint_ban_button()
+        self._paint_ban_all()
 
     def _remember_base_choice(self) -> None:
         self.base_allowed[self.craft_mode] = self.allow_new_base.get()
