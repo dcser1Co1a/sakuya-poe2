@@ -427,14 +427,15 @@ class FilterPage:
         holder.rowconfigure(0, weight=1)
         self.steps_canvas = tk.Canvas(holder, bg=colors["background"], highlightthickness=0, bd=0)
         self.steps_canvas.grid(row=0, column=0, sticky="nsew")
-        # Each step is its own window on the canvas, not all of them in one frame: the canvas leaves a step scrolled out of sight unshown,
-        # and showing the page costs only what is in view (one frame holding all steps cost every widget each time the tab was opened).
+        # All steps in one column, laid out by Tk. Each step as its own window on the canvas was quicker to show, but on a real screen
+        # the canvas showing and hiding them while scrolling left steps drawn over each other and smears behind.
         self.cards: list[tk.Frame] = []
-        self.card_items: list[int] = []
         self.new_cards: list[tk.Frame] = []
         self.steps_height = 1
-        self.layout_job = None
-        self.steps_canvas.bind("<Configure>", lambda _: self._lay_out_cards())
+        self.building = self.steps_column = tk.Frame(self.steps_canvas, bg=colors["background"])
+        self.steps_window = self.steps_canvas.create_window(0, 0, window=self.steps_column, anchor="nw")
+        self.steps_canvas.bind("<Configure>", lambda event: self.steps_canvas.itemconfigure(self.steps_window, width=event.width))
+        self.steps_column.bind("<Configure>", lambda _: self._lay_out_cards())
         helpers["enable_scrolling"](holder, self.steps_canvas)
         side = tk.Frame(body, bg=colors["panel"], padx=12, pady=10)
         side.grid(row=0, column=1, sticky="nsew")
@@ -525,13 +526,15 @@ class FilterPage:
     def _step(self, number: int, title: str, hint: str = "") -> tk.Frame:
         """One numbered step: a card with its number, title, a line of help, and a «?» that opens the step's guide in plain words."""
         colors = self.colors
-        card = tk.Frame(self.steps_canvas, bg=colors["panel"], padx=12, pady=8)
+        card = tk.Frame(self.building, bg=colors["panel"], padx=12, pady=8)
+        card.pack(fill="x", pady=(0, 6))
         texts = []
 
         def resized(event) -> None:
+            wrap = max(event.width - 40, 200)
             for label in texts:  # the help wraps at the step's width, so a narrow window does not cut it
-                label.configure(wraplength=max(event.width - 40, 200))
-            self._lay_out_soon()  # a step grew or shrank: the ones below move
+                if int(str(label.cget("wraplength"))) != wrap:  # set only when it changes: a new wrap changes the height, and that comes back here
+                    label.configure(wraplength=wrap)
 
         card.bind("<Configure>", resized)
         self.new_cards.append(card)
@@ -593,28 +596,17 @@ class FilterPage:
         box.bind("<MouseWheel>", lambda _: "break")  # scrolling the page must not turn a choice over
         return box
 
-    def _lay_out_soon(self) -> None:
-        if self.layout_job is None:
-            self.layout_job = self.steps_canvas.after_idle(self._lay_out_cards)
-
     def _lay_out_cards(self) -> None:
-        """The steps one under another at the canvas's width, and the scrolling as tall as they are."""
-        if self.layout_job is not None:
-            self.steps_canvas.after_cancel(self.layout_job)
-            self.layout_job = None
-        width, y = max(self.steps_canvas.winfo_width(), 1), 0
-        for item, card in zip(self.card_items, self.cards):
-            self.steps_canvas.coords(item, 0, y)
-            self.steps_canvas.itemconfigure(item, width=width)
-            y += card.winfo_reqheight() + 6
-        self.steps_height = max(y, 1)
-        self.steps_canvas.configure(scrollregion=(0, 0, width, self.steps_height))
+        """The scrolling as tall as the column of steps."""
+        self.steps_height = max(self.steps_column.winfo_reqheight(), 1)
+        self.steps_canvas.configure(scrollregion=(0, 0, max(self.steps_canvas.winfo_width(), 1), self.steps_height))
 
     def render(self, keep_place: bool = False) -> None:
         """The steps are built anew out of sight and take the old ones' place in one stroke, at the same scroll: removing a line or opening its settings does not make the page jump."""
         colors, t, helpers = self.colors, self.t, self.helpers
         place = self.steps_canvas.yview()[0] * self.steps_height if keep_place else 0  # in pixels: the page above the change stays put
         self.new_cards = []
+        self.building = tk.Frame(self.steps_canvas, bg=self.colors["background"])  # built out of sight, then swapped in whole
         self.drawn_from = self._drawn_from()
         folder = self.drawn_from[0]
 
@@ -714,14 +706,14 @@ class FilterPage:
         helpers["switch"](second, t("Обновлять самому, когда меняются цены"), auto, set_auto, size=9).pack(side="left")
         self._draw_preview()
         self.steps_canvas.update_idletasks()  # the new steps have their size before they are shown
-        old_cards, old_items = self.cards, self.card_items
-        self.cards, self.card_items = self.new_cards, [self.steps_canvas.create_window(0, 0, window=card, anchor="nw") for card in self.new_cards]
+        old = self.steps_column
+        self.steps_column, self.cards = self.building, self.new_cards
+        self.steps_column.bind("<Configure>", lambda _: self._lay_out_cards())
+        self.steps_canvas.itemconfigure(self.steps_window, window=self.steps_column, width=max(self.steps_canvas.winfo_width(), 1))
+        self.steps_canvas.update_idletasks()
         self._lay_out_cards()
         self.steps_canvas.yview_moveto(place / self.steps_height)
-        for item in old_items:
-            self.steps_canvas.delete(item)
-        for card in old_cards:
-            card.destroy()
+        old.destroy()
 
     def _use_preset(self, key: str) -> None:
         apply_preset(self.settings, key, (self.helpers["prices"]() or {}).get("exalted_per_divine"))
